@@ -2075,10 +2075,10 @@ class MainActivity : AppCompatActivity() {
         )
 
         val ringConfigs = listOf(
-            TagRingMenuView.RingConfig(rings[0], 0.10f, 0.24f),
-            TagRingMenuView.RingConfig(rings[1], 0.24f, 0.40f),
-            TagRingMenuView.RingConfig(rings[2], 0.40f, 0.58f),
-            TagRingMenuView.RingConfig(rings[3], 0.58f, 0.78f),
+            TagRingMenuView.RingConfig(rings[0], 0.10f, 0.27f),
+            TagRingMenuView.RingConfig(rings[1], 0.27f, 0.44f),
+            TagRingMenuView.RingConfig(rings[2], 0.44f, 0.61f),
+            TagRingMenuView.RingConfig(rings[3], 0.61f, 0.78f),
             TagRingMenuView.RingConfig(ribbonItems, 0.78f, 0.95f, isRibbon = true)
         )
 
