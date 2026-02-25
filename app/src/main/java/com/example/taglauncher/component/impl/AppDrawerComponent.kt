@@ -438,7 +438,7 @@ class AppDrawerComponent(
                 default = 48,
                 min = 32,
                 max = 96,
-                step = 4
+                step = 1
             ),
             SettingDefinition.IntRange(
                 key = "iconSize",
@@ -447,7 +447,7 @@ class AppDrawerComponent(
                 default = 48,
                 min = 16,
                 max = 96,
-                step = 4
+                step = 1
             ),
             SettingDefinition.Choice(
                 key = "iconShape",
