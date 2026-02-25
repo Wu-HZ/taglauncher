@@ -11,12 +11,16 @@ import org.json.JSONObject
 data class DesktopLayoutData(
     val version: Int = CURRENT_VERSION,
     val components: List<ComponentData>,
+    val pageCount: Int = 1,
+    val homePage: Int = 0,
     val lastModified: Long = System.currentTimeMillis()
 ) {
     fun toJson(): JSONObject {
         return JSONObject().apply {
             put("version", version)
             put("lastModified", lastModified)
+            put("pageCount", pageCount)
+            put("homePage", homePage)
             val componentsArray = JSONArray()
             components.forEach { component ->
                 componentsArray.put(component.toJson())
@@ -91,6 +95,8 @@ data class DesktopLayoutData(
         fun fromJson(json: JSONObject): DesktopLayoutData {
             val version = json.optInt("version", CURRENT_VERSION)
             val lastModified = json.optLong("lastModified", System.currentTimeMillis())
+            val pageCount = json.optInt("pageCount", 1).coerceAtLeast(1)
+            val homePage = json.optInt("homePage", 0).coerceAtLeast(0)
             val componentsArray = json.optJSONArray("components") ?: JSONArray()
 
             val components = mutableListOf<ComponentData>()
@@ -105,6 +111,8 @@ data class DesktopLayoutData(
             return DesktopLayoutData(
                 version = version,
                 components = components,
+                pageCount = pageCount,
+                homePage = homePage.coerceAtMost(pageCount - 1),
                 lastModified = lastModified
             )
         }
@@ -113,7 +121,7 @@ data class DesktopLayoutData(
          * Create an empty layout.
          */
         fun empty(): DesktopLayoutData {
-            return DesktopLayoutData(components = emptyList())
+            return DesktopLayoutData(components = emptyList(), pageCount = 1, homePage = 0)
         }
     }
 }

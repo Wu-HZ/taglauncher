@@ -27,6 +27,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import com.example.taglauncher.component.ComponentType
 import com.example.taglauncher.component.DesktopComponent
@@ -36,10 +37,10 @@ import com.example.taglauncher.component.impl.SearchBarComponent
 import com.example.taglauncher.desktop.ComponentBounds
 import com.example.taglauncher.desktop.DesktopCanvasView
 import com.example.taglauncher.desktop.DesktopLayoutManager
-import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import com.google.android.material.button.MaterialButton
 import java.lang.reflect.Method
 
 class MainActivity : AppCompatActivity() {
@@ -123,9 +124,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        returnToHomePageIfNeeded()
         refreshComponents()
         updateTagFabPosition()
         updateTagFabAppearance()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        returnToHomePageIfNeeded()
     }
 
     private fun initViews() {
@@ -155,6 +163,15 @@ class MainActivity : AppCompatActivity() {
         searchOverlayClear = findViewById(R.id.searchOverlayClear)
 
         setupSearchOverlay()
+    }
+
+    private fun returnToHomePageIfNeeded() {
+        if (!layoutManager.isEditMode()) {
+            val homePage = layoutManager.getHomePage()
+            if (desktopCanvas.getCurrentPage() != homePage) {
+                desktopCanvas.scrollToPage(homePage, animate = true)
+            }
+        }
     }
 
     private fun initializeDesktop() {
@@ -380,18 +397,120 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEditMenu() {
-        val options = arrayOf("Edit Desktop", "Settings")
+        val options = arrayOf("Edit Desktop", "Add Page", "Manage Pages", "Settings")
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Edit Menu")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> enterEditMode()
-                    1 -> startActivity(Intent(this, SettingsActivity::class.java))
+                    1 -> {
+                        val newCount = layoutManager.addPage()
+                        Toast.makeText(this, "Page $newCount added", Toast.LENGTH_SHORT).show()
+                    }
+                    2 -> showManagePagesDialog()
+                    3 -> startActivity(Intent(this, SettingsActivity::class.java))
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun showManagePagesDialog() {
+        val layoutData = layoutManager.getLayoutSnapshot()
+        if (layoutData.pageCount <= 0) return
+
+        val dialogView = layoutInflater.inflate(R.layout.dialog_manage_pages, null)
+        val recycler = dialogView.findViewById<RecyclerView>(R.id.pagesRecycler)
+        val addButton = dialogView.findViewById<MaterialButton>(R.id.addPageButton)
+
+        val pageWidthDp = desktopCanvas.getPageWidthDp()
+        val pageHeightDp = desktopCanvas.height / resources.displayMetrics.density
+
+        lateinit var adapter: PageManagerAdapter
+        adapter = PageManagerAdapter(
+            layoutData = layoutData,
+            pageWidthDp = pageWidthDp,
+            pageHeightDp = pageHeightDp,
+            currentPage = desktopCanvas.getCurrentPage(),
+            onSelectPage = { index ->
+                desktopCanvas.scrollToPage(index, animate = true)
+            },
+            onSetHome = { index ->
+                layoutManager.setHomePage(index)
+                refreshManagePages(adapter)
+            },
+            onDeletePage = { index ->
+                confirmDeletePage(index, adapter)
+            }
+        )
+
+        recycler.layoutManager = GridLayoutManager(this, 2)
+        recycler.adapter = adapter
+
+        val touchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
+            0
+        ) {
+            override fun onMove(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                val from = viewHolder.bindingAdapterPosition
+                val to = target.bindingAdapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) {
+                    return false
+                }
+                val moved = layoutManager.movePage(from, to)
+                if (moved) {
+                    refreshManagePages(adapter)
+                }
+                return moved
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
+        })
+        touchHelper.attachToRecyclerView(recycler)
+
+        addButton.setOnClickListener {
+            layoutManager.addPage()
+            refreshManagePages(adapter)
+        }
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Manage Pages")
+            .setView(dialogView)
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun confirmDeletePage(pageIndex: Int, adapter: PageManagerAdapter) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Delete Page")
+            .setMessage("Delete Page ${pageIndex + 1}? Components on this page will be removed.")
+            .setPositiveButton("Delete") { _, _ ->
+                if (layoutManager.deletePage(pageIndex)) {
+                    Toast.makeText(this, "Page deleted", Toast.LENGTH_SHORT).show()
+                    refreshManagePages(adapter)
+                } else {
+                    Toast.makeText(this, "At least one page is required", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun refreshManagePages(adapter: PageManagerAdapter) {
+        val layoutData = layoutManager.getLayoutSnapshot()
+        val pageWidthDp = desktopCanvas.getPageWidthDp()
+        val pageHeightDp = desktopCanvas.height / resources.displayMetrics.density
+        adapter.updateSnapshot(
+            newLayoutData = layoutData,
+            pageWidthDp = pageWidthDp,
+            pageHeightDp = pageHeightDp,
+            currentPage = desktopCanvas.getCurrentPage()
+        )
     }
 
     private fun enterEditMode() {

@@ -11,6 +11,8 @@ import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewConfiguration
+import android.widget.OverScroller
 import com.example.taglauncher.component.DesktopComponent
 import kotlin.math.abs
 
@@ -41,6 +43,18 @@ class DesktopCanvasView @JvmOverloads constructor(
     private var longPressHandler: Handler? = null
     private var longPressRunnable: Runnable? = null
     private var hasTriggeredLongPress = false
+
+    // Paging
+    private var pageCount = 1
+    private var currentPage = 0
+    private var isPaging = false
+    private var pagingStartX = 0f
+    private var pagingStartY = 0f
+    private var pagingLastX = 0f
+    private var pagingStartPage = 0
+    private val pageFlipThresholdRatio = 0.80f
+    private val pagingTouchSlop = (ViewConfiguration.get(context).scaledTouchSlop * 0.6f).toInt()
+    private val scroller = OverScroller(context)
 
     // Original bounds before drag/resize
     private var originalBounds: ComponentBounds? = null
@@ -85,6 +99,42 @@ class DesktopCanvasView @JvmOverloads constructor(
     private val density = context.resources.displayMetrics.density
     private val handleRadius = 12f * density
     private val tempRect = RectF()
+
+    /**
+     * Set the number of horizontal pages.
+     */
+    fun setPageCount(count: Int) {
+        pageCount = count.coerceAtLeast(1)
+        if (currentPage >= pageCount) {
+            currentPage = pageCount - 1
+        }
+        scrollToPage(currentPage, animate = false)
+    }
+
+    fun getPageCount(): Int = pageCount
+
+    fun getCurrentPage(): Int = currentPage
+
+    fun getPageWidthDp(): Float {
+        val widthPx = if (width > 0) width else context.resources.displayMetrics.widthPixels
+        return widthPx / density
+    }
+
+    fun scrollToPage(page: Int, animate: Boolean = true) {
+        val targetPage = page.coerceIn(0, pageCount - 1)
+        currentPage = targetPage
+        if (width == 0) {
+            post { scrollToPage(targetPage, animate) }
+            return
+        }
+        val targetX = targetPage * width
+        if (animate) {
+            scroller.startScroll(scrollX, 0, targetX - scrollX, 0, 280)
+            postInvalidateOnAnimation()
+        } else {
+            scrollTo(targetX, 0)
+        }
+    }
 
     /**
      * Add a component to the canvas.
@@ -151,6 +201,8 @@ class DesktopCanvasView @JvmOverloads constructor(
      * Find the component at a given point (in pixels).
      */
     fun getComponentAt(x: Float, y: Float): DesktopComponent? {
+        val adjustedX = x + scrollX
+        val adjustedY = y + scrollY
         // Check in reverse order (top-most first based on z-index)
         val sortedComponents = components.values.sortedByDescending {
             it.toComponentData().zIndex
@@ -163,7 +215,7 @@ class DesktopCanvasView @JvmOverloads constructor(
             val right = left + bounds.width * density
             val bottom = top + bounds.height * density
 
-            if (x >= left && x <= right && y >= top && y <= bottom) {
+            if (adjustedX >= left && adjustedX <= right && adjustedY >= top && adjustedY <= bottom) {
                 return component
             }
         }
@@ -211,6 +263,8 @@ class DesktopCanvasView @JvmOverloads constructor(
      */
     fun getResizeHandleAt(x: Float, y: Float): Int {
         val component = getSelectedComponent() ?: return -1
+        val adjustedX = x + scrollX
+        val adjustedY = y + scrollY
         val bounds = component.bounds
 
         val left = bounds.x * density
@@ -233,8 +287,8 @@ class DesktopCanvasView @JvmOverloads constructor(
 
         val hitRadius = handleRadius * 1.5f
         handles.forEachIndexed { index, (hx, hy) ->
-            val dx = x - hx
-            val dy = y - hy
+            val dx = adjustedX - hx
+            val dy = adjustedY - hy
             if (dx * dx + dy * dy <= hitRadius * hitRadius) {
                 return index
             }
@@ -278,6 +332,20 @@ class DesktopCanvasView @JvmOverloads constructor(
         }
 
         setMeasuredDimension(width, height)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w != oldw) {
+            scrollToPage(currentPage, animate = false)
+        }
+    }
+
+    override fun computeScroll() {
+        if (scroller.computeScrollOffset()) {
+            scrollTo(scroller.currX, scroller.currY)
+            postInvalidateOnAnimation()
+        }
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -357,6 +425,32 @@ class DesktopCanvasView @JvmOverloads constructor(
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
         if (!isInEditMode) {
+            if (pageCount <= 1) {
+                return false
+            }
+            when (ev.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    pagingStartX = ev.x
+                    pagingStartY = ev.y
+                    pagingLastX = ev.x
+                    pagingStartPage = currentPage
+                    isPaging = false
+                    if (!scroller.isFinished) {
+                        scroller.forceFinished(true)
+                    }
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = abs(ev.x - pagingStartX)
+                    val dy = abs(ev.y - pagingStartY)
+                    if (dx > pagingTouchSlop && dx > dy) {
+                        isPaging = true
+                        return true
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isPaging = false
+                }
+            }
             return false
         }
 
@@ -410,9 +504,11 @@ class DesktopCanvasView @JvmOverloads constructor(
                             val top = bounds.y * density
                             val right = left + bounds.width * density
                             val bottom = top + bounds.height * density
+                            val adjustedDownX = touchDownX + scrollX
+                            val adjustedDownY = touchDownY + scrollY
 
-                            if (touchDownX >= left && touchDownX <= right &&
-                                touchDownY >= top && touchDownY <= bottom
+                            if (adjustedDownX >= left && adjustedDownX <= right &&
+                                adjustedDownY >= top && adjustedDownY <= bottom
                             ) {
                                 isDragging = true
                                 originalBounds = bounds.copy()
@@ -433,6 +529,41 @@ class DesktopCanvasView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isInEditMode) {
+            if (pageCount <= 1) {
+                return false
+            }
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    pagingLastX = event.x
+                    pagingStartPage = currentPage
+                    return true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = pagingLastX - event.x
+                    val target = (scrollX + dx).toInt()
+                        .coerceIn(0, (pageCount - 1) * width)
+                    scrollTo(target, 0)
+                    pagingLastX = event.x
+                    return true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val targetPage = if (width > 0) {
+                        val startPage = pagingStartPage.coerceIn(0, pageCount - 1)
+                        val delta = scrollX - startPage * width
+                        val trigger = width * (1f - pageFlipThresholdRatio)
+                        when {
+                            delta > trigger -> (startPage + 1).coerceAtMost(pageCount - 1)
+                            delta < -trigger -> (startPage - 1).coerceAtLeast(0)
+                            else -> startPage
+                        }
+                    } else {
+                        0
+                    }
+                    scrollToPage(targetPage, animate = true)
+                    isPaging = false
+                    return true
+                }
+            }
             return false
         }
 
@@ -498,9 +629,12 @@ class DesktopCanvasView @JvmOverloads constructor(
         val newY = component.bounds.y + dy / density
 
         // Clamp to screen bounds
-        val maxX = (width / density) - component.bounds.width
+        val pageWidthDp = getPageWidthDp()
+        val pageIndex = (original.x / pageWidthDp).toInt().coerceIn(0, pageCount - 1)
+        val minX = pageIndex * pageWidthDp
+        val maxX = minX + pageWidthDp - component.bounds.width
         val maxY = (height / density) - component.bounds.height
-        val clampedX = newX.coerceIn(0f, maxX.coerceAtLeast(0f))
+        val clampedX = newX.coerceIn(minX, maxX.coerceAtLeast(minX))
         val clampedY = newY.coerceIn(0f, maxY.coerceAtLeast(0f))
 
         component.bounds = component.bounds.copy(x = clampedX, y = clampedY)
