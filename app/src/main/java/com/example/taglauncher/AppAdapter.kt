@@ -23,7 +23,6 @@ class AppAdapter(
     private val context: Context,
     private var appList: List<AppInfo>,
     private val onAppClick: (AppInfo) -> Unit,
-    private val onAddToDock: ((AppInfo) -> Unit)? = null,
     private val onHideApp: ((AppInfo) -> Unit)? = null,
     private val onManageTags: ((AppInfo) -> Unit)? = null,
     private var showLabels: Boolean = true,
@@ -153,10 +152,6 @@ class AppAdapter(
                 }
                 R.id.action_uninstall -> {
                     uninstallApp(appInfo.packageName)
-                    true
-                }
-                R.id.action_add_to_dock -> {
-                    onAddToDock?.invoke(appInfo)
                     true
                 }
                 R.id.action_hide_app -> {

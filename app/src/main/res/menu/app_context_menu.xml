@@ -4,9 +4,6 @@
         android:id="@+id/action_tags"
         android:title="@string/tags" />
     <item
-        android:id="@+id/action_add_to_dock"
-        android:title="@string/add_to_dock" />
-    <item
         android:id="@+id/action_hide_app"
         android:title="@string/hide_app" />
     <item

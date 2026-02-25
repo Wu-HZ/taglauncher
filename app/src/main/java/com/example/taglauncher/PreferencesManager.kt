@@ -100,16 +100,6 @@ class PreferencesManager(context: Context) {
         prefs.edit().putString(KEY_DOCK_APPS, jsonArray.toString()).apply()
     }
 
-    fun addToDock(packageName: String): Boolean {
-        val current = getDockApps().toMutableList()
-        if (current.size >= getMaxDockApps() || current.contains(packageName)) {
-            return false
-        }
-        current.add(packageName)
-        saveDockApps(current)
-        return true
-    }
-
     fun removeFromDock(packageName: String): Boolean {
         val current = getDockApps().toMutableList()
         val removed = current.remove(packageName)

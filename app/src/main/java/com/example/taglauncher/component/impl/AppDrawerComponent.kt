@@ -42,7 +42,6 @@ class AppDrawerComponent(
 
     // Callbacks for external handling
     var onAppClick: ((AppInfo) -> Unit)? = null
-    var onAddToDock: ((AppInfo) -> Unit)? = null
     var onHideApp: ((AppInfo) -> Unit)? = null
     var onManageTags: ((AppInfo) -> Unit)? = null
 
@@ -106,7 +105,6 @@ class AppDrawerComponent(
                     onAppClick?.invoke(appInfo)
                 }
             },
-            onAddToDock = { appInfo -> onAddToDock?.invoke(appInfo) },
             onHideApp = { appInfo ->
                 onHideApp?.invoke(appInfo)
                 reloadVisibleApps()

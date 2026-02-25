@@ -219,9 +219,6 @@ class MainActivity : AppCompatActivity() {
                     // Clear search filter after launching app
                     clearSearchFilter()
                 }
-                component.onAddToDock = { appInfo ->
-                    // Dock component removed - this callback no longer used
-                }
                 component.onHideApp = { appInfo -> hideApp(appInfo) }
                 component.onManageTags = { appInfo -> showTagsDialog(appInfo) }
                 component.refreshApps()
