@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew assembleDebug:*)",
+      "Bash(gradlew.bat assembleDebug:*)",
+      "Bash(cmd /c \"gradlew.bat assembleDebug\")",
+      "Bash(cmd /c \"D:\\\\AndroidStudioProjects\\\\TagLauncher\\\\gradlew.bat assembleDebug\")",
+      "Bash(powershell -Command \"cd D:\\\\AndroidStudioProjects\\\\TagLauncher; .\\\\gradlew.bat assembleDebug 2>&1\")",
+      "Bash(.gradlew.bat assembleDebug)",
+      "Bash(./gradlew.bat assembleDebug:*)",
+      "Bash(del \"D:\\\\AndroidStudioProjects\\\\TagLauncher\\\\app\\\\src\\\\main\\\\java\\\\com\\\\example\\\\taglauncher\\\\component\\\\impl\\\\DockComponent.kt\")"
+    ]
+  }
+}

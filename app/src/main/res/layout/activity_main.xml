@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Desktop Canvas for Components -->
+    <com.example.taglauncher.desktop.DesktopCanvasView
+        android:id="@+id/desktopCanvas"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Tag Floating Action Button (System Element) -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/tagFab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="96dp"
+        android:contentDescription="@string/tag_button"
+        android:src="@android:drawable/ic_input_add"
+        app:backgroundTint="#80000000"
+        app:tint="#FFFFFF"
+        app:fabSize="normal" />
+
+    <!-- Tag Ring Menu Overlay -->
+    <com.example.taglauncher.TagRingMenuView
+        android:id="@+id/tagRingMenu"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- Edit Mode Toolbar (pill-shaped, centered at top) -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/editModeToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="48dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#E0000000"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="8dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp">
+
+            <!-- Drag handle for repositioning -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/editToolbarDragHandle"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Drag to move"
+                app:icon="@android:drawable/ic_menu_sort_by_size"
+                app:iconTint="#808080" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="32dp"
+                android:layout_marginHorizontal="4dp"
+                android:background="#40FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/addComponentButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Add Component"
+                app:icon="@android:drawable/ic_input_add"
+                app:iconTint="@android:color/white" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/pasteComponentButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Paste"
+                android:enabled="false"
+                app:icon="@android:drawable/ic_menu_edit"
+                app:iconTint="@android:color/white" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="32dp"
+                android:layout_marginHorizontal="4dp"
+                android:background="#40FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/doneEditButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Done"
+                app:icon="@android:drawable/ic_menu_close_clear_cancel"
+                app:iconTint="#4CAF50" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Component Toolbar (shown when component selected in edit mode) -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/componentToolbar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="24dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#E0000000"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="8dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="4dp">
+
+            <!-- Drag handle for repositioning -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentToolbarDragHandle"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Drag to move"
+                app:icon="@android:drawable/ic_menu_sort_by_size"
+                app:iconTint="#808080" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="32dp"
+                android:layout_marginHorizontal="4dp"
+                android:background="#40FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentSettingsButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Settings"
+                app:icon="@android:drawable/ic_menu_preferences"
+                app:iconTint="@android:color/white" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentCopyButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Copy"
+                app:icon="@android:drawable/ic_menu_save"
+                app:iconTint="@android:color/white" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentCutButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Cut"
+                app:icon="@android:drawable/ic_menu_crop"
+                app:iconTint="@android:color/white" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentSaveButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Save as Template"
+                app:icon="@android:drawable/ic_menu_upload"
+                app:iconTint="@android:color/white" />
+
+            <View
+                android:layout_width="1dp"
+                android:layout_height="32dp"
+                android:layout_marginHorizontal="4dp"
+                android:background="#40FFFFFF" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/componentDeleteButton"
+                style="@style/Widget.Material3.Button.IconButton"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Delete"
+                app:icon="@android:drawable/ic_menu_delete"
+                app:iconTint="#FF5252" />
+
+        </LinearLayout>
+
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Global Search Overlay (floating search bar only) -->
+    <FrameLayout
+        android:id="@+id/searchOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone"
+        android:clickable="true"
+        android:focusable="true">
+
+        <!-- Semi-transparent background (tap to dismiss) -->
+        <View
+            android:id="@+id/searchOverlayBackground"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#00000000" />
+
+        <!-- Floating search bar at top -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/searchBarCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top"
+            android:layout_marginHorizontal="16dp"
+            android:layout_marginTop="48dp"
+            android:translationY="-100dp"
+            app:cardBackgroundColor="#E0202020"
+            app:cardCornerRadius="24dp"
+            app:cardElevation="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="16dp">
+
+                <ImageView
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@android:drawable/ic_menu_search"
+                    android:contentDescription="Search"
+                    app:tint="#AAAAAA" />
+
+                <EditText
+                    android:id="@+id/searchOverlayInput"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:background="@null"
+                    android:hint="Search apps..."
+                    android:textColorHint="#AAAAAA"
+                    android:textColor="@android:color/white"
+                    android:textSize="16sp"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:singleLine="true"
+                    android:importantForAutofill="no" />
+
+                <ImageView
+                    android:id="@+id/searchOverlayClear"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:src="@android:drawable/ic_menu_close_clear_cancel"
+                    android:contentDescription="Clear"
+                    android:visibility="gone"
+                    app:tint="#AAAAAA" />
+
+            </LinearLayout>
+
+        </com.google.android.material.card.MaterialCardView>
+
+    </FrameLayout>
+
+</FrameLayout>
