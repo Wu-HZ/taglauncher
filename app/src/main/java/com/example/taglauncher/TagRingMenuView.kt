@@ -48,6 +48,7 @@ class TagRingMenuView @JvmOverloads constructor(
 
     private var showPinIndicators = false
     private var pinnedPositions: Set<Pair<Int, Int>> = emptySet()
+    private var allowEmptySelection = false
 
     var onTagSelected: ((TagItem?, Boolean, Int, Int) -> Unit)? = null  // tag, isRibbon, ringIndex, segmentIndex
 
@@ -133,6 +134,11 @@ class TagRingMenuView @JvmOverloads constructor(
 
     fun setShowPinIndicators(show: Boolean) {
         showPinIndicators = show
+        invalidate()
+    }
+
+    fun setAllowEmptySelection(allow: Boolean) {
+        allowEmptySelection = allow
         invalidate()
     }
 
@@ -244,8 +250,8 @@ class TagRingMenuView @JvmOverloads constructor(
                     val angleInArc = normalizedAngle - arcStartAngle
                     val potentialSegment = (angleInArc / segmentAngle).toInt().coerceIn(0, segmentCount - 1)
 
-                    // Only select if the slot has a tag (not empty)
-                    if (ring.tags[potentialSegment] != null) {
+                    val isSelectable = ring.tags[potentialSegment] != null || (allowEmptySelection && !ring.isRibbon)
+                    if (isSelectable) {
                         selectedRingIndex = ringIndex
                         selectedSegmentIndex = potentialSegment
                     }
@@ -398,6 +404,11 @@ class TagRingMenuView @JvmOverloads constructor(
                 }
             } else {
                 // Draw empty slot - just a faint outline
+                if (isSelected) {
+                    canvas.drawPath(path, highlightPaint.apply {
+                        alpha = (80 * animationProgress).toInt()
+                    })
+                }
                 emptySlotPaint.alpha = (40 * animationProgress).toInt()
                 canvas.drawPath(path, emptySlotPaint)
             }

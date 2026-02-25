@@ -103,6 +103,7 @@ class MainActivity : AppCompatActivity() {
     private var currentRibbonAction: String? = null
 
     companion object {
+        const val ALL_TAG_ID = "all"
         const val RIBBON_ACTION_EDIT_TAG = "ribbon_edit_tag"
         const val RIBBON_ACTION_EDIT_APPS = "ribbon_edit_apps"
         const val RIBBON_ACTION_PIN_TAG = "ribbon_pin_tag"
@@ -920,7 +921,11 @@ class MainActivity : AppCompatActivity() {
                     tagRingMenu.hide()
                 }
             } else {
-                if (currentRibbonAction == null) {
+                if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
+                    ringIndex >= 0 && segmentIndex >= 0
+                ) {
+                    showPinTagDialog(ringIndex, segmentIndex)
+                } else if (currentRibbonAction == null) {
                     isTagMenuActive = false
                     tagRingMenu.hide()
                 }
@@ -972,7 +977,11 @@ class MainActivity : AppCompatActivity() {
                                 tagRingMenu.hide()
                             }
                         } else {
-                            if (currentRibbonAction == null) {
+                            if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
+                                ringIndex >= 0 && segmentIndex >= 0
+                            ) {
+                                showPinTagDialog(ringIndex, segmentIndex)
+                            } else if (currentRibbonAction == null) {
                                 isTagMenuActive = false
                                 tagRingMenu.hide()
                             }
@@ -991,11 +1000,13 @@ class MainActivity : AppCompatActivity() {
                 if (currentRibbonAction == RIBBON_ACTION_EDIT_TAG) {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
+                    tagRingMenu.setAllowEmptySelection(false)
                     isTagMenuActive = false
                     tagRingMenu.hide()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_EDIT_TAG
                     tagRingMenu.setShowPinIndicators(false)
+                    tagRingMenu.setAllowEmptySelection(false)
                     Toast.makeText(this, "Select a tag to edit (tap Edit again to exit)", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -1003,11 +1014,13 @@ class MainActivity : AppCompatActivity() {
                 if (currentRibbonAction == RIBBON_ACTION_EDIT_APPS) {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
+                    tagRingMenu.setAllowEmptySelection(false)
                     isTagMenuActive = false
                     tagRingMenu.hide()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_EDIT_APPS
                     tagRingMenu.setShowPinIndicators(false)
+                    tagRingMenu.setAllowEmptySelection(false)
                     Toast.makeText(this, "Select a tag to manage apps (tap Apps again to exit)", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -1015,11 +1028,13 @@ class MainActivity : AppCompatActivity() {
                 if (currentRibbonAction == RIBBON_ACTION_PIN_TAG) {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
+                    tagRingMenu.setAllowEmptySelection(false)
                     isTagMenuActive = false
                     tagRingMenu.hide()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_PIN_TAG
                     tagRingMenu.setShowPinIndicators(true)
+                    tagRingMenu.setAllowEmptySelection(true)
                     Toast.makeText(this, "Tap a tag to pin/unpin it (tap Pin again to exit)", Toast.LENGTH_SHORT).show()
                 }
             }
@@ -1027,7 +1042,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyRibbonActionToTag(tag: TagItem, ringIndex: Int, segmentIndex: Int) {
-        if (tag.id == "all") {
+        if (tag.id == ALL_TAG_ID && currentRibbonAction != RIBBON_ACTION_PIN_TAG) {
             Toast.makeText(this, "Cannot modify 'All' tag", Toast.LENGTH_SHORT).show()
             return
         }
@@ -1166,22 +1181,22 @@ class MainActivity : AppCompatActivity() {
         val allTags = preferencesManager.getAllTags()
         val pinnedPositions = preferencesManager.getPinnedTagPositions()
         val currentPinnedTagId = preferencesManager.getTagIdAtPinnedPosition(ringIndex, segmentIndex)
-
-        if (allTags.isEmpty()) {
-            Toast.makeText(this, "No tags available. Create a tag first.", Toast.LENGTH_SHORT).show()
-            return
+        val allTag = TagItem(ALL_TAG_ID, "All", android.graphics.Color.parseColor("#78909C"))
+        val pinTags = mutableListOf<TagItem>().apply {
+            add(allTag)
+            addAll(allTags)
         }
 
         val tagLabels = mutableListOf<String>()
         val tagIds = mutableListOf<String?>()
 
         if (currentPinnedTagId != null) {
-            val currentTag = allTags.find { it.id == currentPinnedTagId }
+            val currentTag = pinTags.find { it.id == currentPinnedTagId }
             tagLabels.add("Unpin (currently: ${currentTag?.label ?: "Unknown"})")
             tagIds.add(null)
         }
 
-        allTags.forEach { tag ->
+        pinTags.forEach { tag ->
             val isPinned = pinnedPositions.containsKey(tag.id)
             val pinnedPos = pinnedPositions[tag.id]
             val label = if (isPinned && pinnedPos != null) {
@@ -1236,7 +1251,7 @@ class MainActivity : AppCompatActivity() {
             itemIndex = 1
         }
 
-        allTags.forEachIndexed { index, tag ->
+        pinTags.forEachIndexed { index, tag ->
             val isPinnedHere = tag.id == currentPinnedTagId
             val item = createPinDialogItem(
                 label = tagLabels[itemIndex + index],
@@ -2005,10 +2020,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateTagRingMenu() {
         val userTags = preferencesManager.getAllTags()
         val pinnedPositions = preferencesManager.getPinnedTagPositions()
+        val allTag = TagItem(ALL_TAG_ID, "All", android.graphics.Color.parseColor("#78909C"))
+        val validTagIds = userTags.map { it.id }.toMutableSet().apply { add(ALL_TAG_ID) }
 
-        preferencesManager.cleanupInvalidPins(userTags.map { it.id }.toSet())
-
-        val allTag: TagItem? = TagItem("all", "All", android.graphics.Color.parseColor("#78909C"))
+        preferencesManager.cleanupInvalidPins(validTagIds)
 
         val ringSizes = listOf(3, 5, 7, 10)
 
@@ -2021,7 +2036,7 @@ class MainActivity : AppCompatActivity() {
 
             for ((tagId, pos) in pinnedPositions) {
                 if (pos.first == ringIndex && pos.second < ringSize) {
-                    val tag = userTags.find { it.id == tagId }
+                    val tag = if (tagId == ALL_TAG_ID) allTag else userTags.find { it.id == tagId }
                     if (tag != null) {
                         ring[pos.second] = tag
                         usedTagIds.add(tagId)
@@ -2033,18 +2048,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         val unpinnedTags = userTags.filter { !usedTagIds.contains(it.id) }.toMutableList()
-
-        val ring0 = rings[0].toMutableList()
-        ring0[0] = allTag
-
-        for (i in 1 until ringSizes[0]) {
-            if (ring0[i] == null && unpinnedTags.isNotEmpty()) {
-                ring0[i] = unpinnedTags.removeAt(0)
+        if (!pinnedPositions.containsKey(ALL_TAG_ID)) {
+            if (rings.isNotEmpty() && rings[0].isNotEmpty() && rings[0][0] == null) {
+                val ring0 = rings[0].toMutableList()
+                ring0[0] = allTag
+                rings[0] = ring0
+            } else {
+                unpinnedTags.add(0, allTag)
             }
         }
-        rings[0] = ring0
 
-        for (ringIndex in 1 until 4) {
+        for (ringIndex in 0 until 4) {
             val ring = rings[ringIndex].toMutableList()
             for (i in 0 until ringSizes[ringIndex]) {
                 if (ring[i] == null && unpinnedTags.isNotEmpty()) {
