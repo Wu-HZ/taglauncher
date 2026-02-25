@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
@@ -18,6 +19,7 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -76,6 +78,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var searchOverlayInput: EditText
     private lateinit var searchOverlayClear: ImageView
     private var isSearchOverlayVisible = false
+
+    // Manage pages overlay
+    private lateinit var managePagesOverlay: FrameLayout
+    private lateinit var managePagesRecycler: RecyclerView
+    private lateinit var managePagesAddButton: MaterialButton
+    private lateinit var managePagesCloseButton: ImageButton
+    private var managePagesAdapter: PageManagerAdapter? = null
+    private val pagePreviewCache = mutableMapOf<Int, Bitmap>()
+    private var pagePreviewSize: Pair<Int, Int>? = null
 
     private lateinit var preferencesManager: PreferencesManager
 
@@ -164,6 +175,14 @@ class MainActivity : AppCompatActivity() {
         searchOverlayClear = findViewById(R.id.searchOverlayClear)
 
         setupSearchOverlay()
+
+        // Manage pages overlay
+        managePagesOverlay = findViewById(R.id.managePagesOverlay)
+        managePagesRecycler = findViewById(R.id.managePagesRecycler)
+        managePagesAddButton = findViewById(R.id.managePagesAddButton)
+        managePagesCloseButton = findViewById(R.id.managePagesCloseButton)
+
+        setupManagePagesOverlay()
     }
 
     private fun returnToHomePageIfNeeded() {
@@ -392,7 +411,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         // Only process global gestures if not disabled by child views (e.g., AppGridComponent)
-        if (!isGlobalGestureDisabled) {
+        val isManagePagesVisible =
+            ::managePagesOverlay.isInitialized && managePagesOverlay.visibility == View.VISIBLE
+        if (!isGlobalGestureDisabled && !isManagePagesVisible) {
             scaleGestureDetector.onTouchEvent(event)
             gestureDetector.onTouchEvent(event)
         }
@@ -419,34 +440,66 @@ class MainActivity : AppCompatActivity() {
     private fun showManagePagesDialog() {
         val layoutData = layoutManager.getLayoutSnapshot()
         if (layoutData.pageCount <= 0) return
+        showManagePagesOverlay()
+    }
 
-        val dialogView = layoutInflater.inflate(R.layout.dialog_manage_pages, null)
-        val recycler = dialogView.findViewById<RecyclerView>(R.id.pagesRecycler)
-        val addButton = dialogView.findViewById<MaterialButton>(R.id.addPageButton)
+    private fun setupManagePagesOverlay() {
+        managePagesOverlay.setOnClickListener { }
+        managePagesCloseButton.setOnClickListener { hideManagePagesOverlay() }
+        managePagesAddButton.setOnClickListener {
+            layoutManager.addPage()
+            managePagesAdapter?.let { refreshManagePages(it) }
+        }
+    }
 
+    private fun showManagePagesOverlay() {
+        if (managePagesOverlay.visibility != View.VISIBLE) {
+            managePagesOverlay.visibility = View.VISIBLE
+        }
+        ensureManagePagesAdapter()
+        managePagesAdapter?.let { refreshManagePages(it) }
+    }
+
+    private fun hideManagePagesOverlay() {
+        managePagesOverlay.visibility = View.GONE
+        pagePreviewCache.clear()
+        pagePreviewSize = null
+    }
+
+    private fun ensureManagePagesAdapter() {
+        if (managePagesAdapter != null) return
+        val layoutData = layoutManager.getLayoutSnapshot()
         val pageWidthDp = desktopCanvas.getPageWidthDp()
-        val pageHeightDp = desktopCanvas.height / resources.displayMetrics.density
+        val pageHeightDp = if (desktopCanvas.height > 0) {
+            desktopCanvas.height / resources.displayMetrics.density
+        } else {
+            resources.displayMetrics.heightPixels / resources.displayMetrics.density
+        }
 
-        lateinit var adapter: PageManagerAdapter
-        adapter = PageManagerAdapter(
+        val adapter = PageManagerAdapter(
             layoutData = layoutData,
             pageWidthDp = pageWidthDp,
             pageHeightDp = pageHeightDp,
             currentPage = desktopCanvas.getCurrentPage(),
             onSelectPage = { index ->
                 desktopCanvas.scrollToPage(index, animate = true)
+                hideManagePagesOverlay()
             },
             onSetHome = { index ->
                 layoutManager.setHomePage(index)
-                refreshManagePages(adapter)
+                managePagesAdapter?.let { refreshManagePages(it) }
             },
             onDeletePage = { index ->
-                confirmDeletePage(index, adapter)
+                managePagesAdapter?.let { confirmDeletePage(index, it) }
+            },
+            previewProvider = { pageIndex, width, height ->
+                getPagePreview(pageIndex, width, height)
             }
         )
 
-        recycler.layoutManager = GridLayoutManager(this, 2)
-        recycler.adapter = adapter
+        managePagesRecycler.layoutManager = GridLayoutManager(this, 2)
+        managePagesRecycler.adapter = adapter
+        managePagesAdapter = adapter
 
         val touchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
@@ -471,18 +524,22 @@ class MainActivity : AppCompatActivity() {
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
         })
-        touchHelper.attachToRecyclerView(recycler)
+        touchHelper.attachToRecyclerView(managePagesRecycler)
+    }
 
-        addButton.setOnClickListener {
-            layoutManager.addPage()
-            refreshManagePages(adapter)
+    private fun getPagePreview(pageIndex: Int, targetWidth: Int, targetHeight: Int): Bitmap? {
+        val sizeKey = targetWidth to targetHeight
+        if (pagePreviewSize != sizeKey) {
+            pagePreviewCache.clear()
+            pagePreviewSize = sizeKey
         }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Manage Pages")
-            .setView(dialogView)
-            .setNegativeButton("Close", null)
-            .show()
+        val cached = pagePreviewCache[pageIndex]
+        if (cached != null) return cached
+        val bitmap = desktopCanvas.renderPagePreview(pageIndex, targetWidth, targetHeight)
+        if (bitmap != null) {
+            pagePreviewCache[pageIndex] = bitmap
+        }
+        return bitmap
     }
 
     private fun confirmDeletePage(pageIndex: Int, adapter: PageManagerAdapter) {
@@ -504,7 +561,13 @@ class MainActivity : AppCompatActivity() {
     private fun refreshManagePages(adapter: PageManagerAdapter) {
         val layoutData = layoutManager.getLayoutSnapshot()
         val pageWidthDp = desktopCanvas.getPageWidthDp()
-        val pageHeightDp = desktopCanvas.height / resources.displayMetrics.density
+        val pageHeightDp = if (desktopCanvas.height > 0) {
+            desktopCanvas.height / resources.displayMetrics.density
+        } else {
+            resources.displayMetrics.heightPixels / resources.displayMetrics.density
+        }
+        pagePreviewCache.clear()
+        pagePreviewSize = null
         adapter.updateSnapshot(
             newLayoutData = layoutData,
             pageWidthDp = pageWidthDp,
@@ -1220,6 +1283,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupBackHandler() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                if (managePagesOverlay.visibility == View.VISIBLE) {
+                    hideManagePagesOverlay()
+                    return
+                }
                 // If search overlay is visible, hide it
                 if (isSearchOverlayVisible) {
                     hideSearchOverlay()

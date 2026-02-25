@@ -1,6 +1,7 @@
 package com.example.taglauncher.desktop
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -15,6 +16,7 @@ import android.view.ViewConfiguration
 import android.widget.OverScroller
 import com.example.taglauncher.component.DesktopComponent
 import kotlin.math.abs
+import kotlin.math.min
 
 /**
  * Custom ViewGroup that hosts desktop components.
@@ -147,6 +149,55 @@ class DesktopCanvasView @JvmOverloads constructor(
             }
             scrollTo(targetX, 0)
         }
+    }
+
+    fun renderPagePreview(pageIndex: Int, targetWidth: Int, targetHeight: Int): Bitmap? {
+        if (targetWidth <= 0 || targetHeight <= 0) return null
+        val pageWidth = if (width > 0) width else context.resources.displayMetrics.widthPixels
+        val pageHeight = if (height > 0) height else context.resources.displayMetrics.heightPixels
+        if (pageWidth == 0 || pageHeight == 0) return null
+
+        val clampedIndex = pageIndex.coerceIn(0, pageCount - 1)
+        val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.BLACK)
+
+        val scale = min(
+            targetWidth.toFloat() / pageWidth.toFloat(),
+            targetHeight.toFloat() / pageHeight.toFloat()
+        )
+        val scaledWidth = pageWidth * scale
+        val scaledHeight = pageHeight * scale
+        val offsetX = (targetWidth - scaledWidth) / 2f
+        val offsetY = (targetHeight - scaledHeight) / 2f
+
+        val pageLeft = clampedIndex * pageWidth
+
+        canvas.save()
+        canvas.translate(offsetX, offsetY)
+        canvas.scale(scale, scale)
+        canvas.clipRect(0f, 0f, pageWidth.toFloat(), pageHeight.toFloat())
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            val childLeft = child.left - pageLeft
+            val childTop = child.top
+            val childRight = childLeft + child.width
+            val childBottom = childTop + child.height
+            if (childRight < 0 || childLeft > pageWidth ||
+                childBottom < 0 || childTop > pageHeight
+            ) {
+                continue
+            }
+            canvas.save()
+            canvas.translate(childLeft.toFloat(), childTop.toFloat())
+            child.draw(canvas)
+            canvas.restore()
+        }
+
+        canvas.restore()
+
+        return bitmap
     }
 
     /**
