@@ -120,18 +120,31 @@ class DesktopCanvasView @JvmOverloads constructor(
         return widthPx / density
     }
 
-    fun scrollToPage(page: Int, animate: Boolean = true) {
+    fun scrollToPage(page: Int, animate: Boolean = true, durationOverrideMs: Int? = null) {
         val targetPage = page.coerceIn(0, pageCount - 1)
         currentPage = targetPage
-        if (width == 0) {
-            post { scrollToPage(targetPage, animate) }
+        val pageWidth = if (width > 0) width else context.resources.displayMetrics.widthPixels
+        if (pageWidth == 0) {
             return
         }
-        val targetX = targetPage * width
+        val targetX = targetPage * pageWidth
         if (animate) {
-            scroller.startScroll(scrollX, 0, targetX - scrollX, 0, 280)
+            val distance = abs(targetX - scrollX)
+            if (distance == 0) {
+                return
+            }
+            if (!scroller.isFinished) {
+                scroller.forceFinished(true)
+            }
+            val pageDelta = distance.toFloat() / pageWidth
+            val duration = durationOverrideMs
+                ?: (220 + 120 * pageDelta).toInt().coerceIn(220, 520)
+            scroller.startScroll(scrollX, 0, targetX - scrollX, 0, duration)
             postInvalidateOnAnimation()
         } else {
+            if (!scroller.isFinished) {
+                scroller.forceFinished(true)
+            }
             scrollTo(targetX, 0)
         }
     }

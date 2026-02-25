@@ -42,6 +42,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.button.MaterialButton
 import java.lang.reflect.Method
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
@@ -133,7 +134,6 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        returnToHomePageIfNeeded()
     }
 
     private fun initViews() {
@@ -168,8 +168,11 @@ class MainActivity : AppCompatActivity() {
     private fun returnToHomePageIfNeeded() {
         if (!layoutManager.isEditMode()) {
             val homePage = layoutManager.getHomePage()
-            if (desktopCanvas.getCurrentPage() != homePage) {
-                desktopCanvas.scrollToPage(homePage, animate = true)
+            val currentPage = desktopCanvas.getCurrentPage()
+            if (currentPage != homePage) {
+                val pageDelta = abs(currentPage - homePage).coerceAtLeast(1)
+                val duration = (320 + 140 * pageDelta).coerceIn(320, 720)
+                desktopCanvas.scrollToPage(homePage, animate = true, durationOverrideMs = duration)
             }
         }
     }
