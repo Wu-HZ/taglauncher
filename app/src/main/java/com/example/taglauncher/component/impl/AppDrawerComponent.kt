@@ -11,6 +11,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.example.taglauncher.AppAdapter
+import com.example.taglauncher.AppIconEditContext
 import com.example.taglauncher.AppInfo
 import com.example.taglauncher.GridSpacingItemDecoration
 import com.example.taglauncher.PreferencesManager
@@ -55,6 +56,7 @@ class AppDrawerComponent(
     var onHideApp: ((AppInfo) -> Unit)? = null
     var onManageTags: ((AppInfo) -> Unit)? = null
     var onManageTagsBatch: ((List<AppInfo>) -> Unit)? = null
+    var onEditIcon: ((AppInfo, AppIconEditContext) -> Unit)? = null
 
     /**
      * Set the provider for all installed apps.
@@ -124,7 +126,6 @@ class AppDrawerComponent(
         val gridPaddingPx = dpToPx(gridPaddingDp.toFloat())
         recyclerView.setPadding(gridPaddingPx, gridPaddingPx, gridPaddingPx, gridPaddingPx)
 
-        val iconFrameSize = getSetting("iconFrameSize", getSetting("iconSize", 48))
         appAdapter = AppAdapter(
             context = context,
             appList = visibleApps,
@@ -139,12 +140,29 @@ class AppDrawerComponent(
                 appAdapter.updateList(visibleApps)
             },
             onManageTags = { appInfo -> onManageTags?.invoke(appInfo) },
+            onEditIcon = { appInfo ->
+                val iconFrameSize = getSetting("iconFrameSize", getSetting("iconSize", 48))
+                val iconShape = getSetting("iconShape", "default")
+                onEditIcon?.invoke(
+                    appInfo,
+                    AppIconEditContext(
+                        componentId = componentId,
+                        iconFrameSizeDp = iconFrameSize,
+                        iconSizeDp = getSetting("iconSize", 48),
+                        iconShape = iconShape
+                    )
+                )
+            },
             getDescription = { appInfo -> preferencesManager.getAppDescription(appInfo.packageName) },
             setDescription = { appInfo, description ->
                 preferencesManager.setAppDescription(appInfo.packageName, description)
             },
+            getIconOverride = { packageName ->
+                preferencesManager.getEffectiveIconOverride(componentId, packageName)
+            },
+            iconFrameBackgroundColor = getSetting("iconFrameBackgroundColor", Color.TRANSPARENT),
             showLabels = getSetting("showLabels", true),
-            iconFrameSizeDp = iconFrameSize,
+            iconFrameSizeDp = getSetting("iconFrameSize", getSetting("iconSize", 48)),
             iconSizeDp = getSetting("iconSize", 48)
         )
         appAdapter.onSelectionChanged = { count ->
@@ -152,12 +170,13 @@ class AppDrawerComponent(
         }
 
         if (!settings.has("iconFrameSize")) {
-            setSetting("iconFrameSize", iconFrameSize)
+            setSetting("iconFrameSize", getSetting("iconSize", 48))
         }
 
         // Apply additional style settings
         appAdapter.setIconShape(getSetting("iconShape", "default"))
         appAdapter.setIconPadding(getSetting("iconPadding", 0))
+        appAdapter.setIconFrameBackgroundColor(getSetting("iconFrameBackgroundColor", Color.TRANSPARENT))
         appAdapter.setLabelSize(getSetting("labelSize", 12))
         appAdapter.setLabelColor(getSetting("labelColor", Color.WHITE))
         appAdapter.setLabelMaxLines(getSetting("labelMaxLines", 1))
@@ -469,6 +488,12 @@ class AppDrawerComponent(
                 min = 0,
                 max = 16
             ),
+            SettingDefinition.Color(
+                key = "iconFrameBackgroundColor",
+                label = "Icon Frame Background",
+                description = "Background color for transparent icons",
+                default = Color.TRANSPARENT
+            ),
 
             // Labels
             SettingDefinition.Toggle(
@@ -580,6 +605,12 @@ class AppDrawerComponent(
                 val padding = (value as? Int) ?: 0
                 if (::appAdapter.isInitialized) {
                     appAdapter.setIconPadding(padding)
+                }
+            }
+            "iconFrameBackgroundColor" -> {
+                val color = (value as? Int) ?: Color.TRANSPARENT
+                if (::appAdapter.isInitialized) {
+                    appAdapter.setIconFrameBackgroundColor(color)
                 }
             }
             "labelSize" -> {

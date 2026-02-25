@@ -12,6 +12,7 @@ import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
+import com.example.taglauncher.ColorSettingUtils
 import com.example.taglauncher.component.DesktopComponent
 import com.example.taglauncher.persistence.SettingDefinition
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -214,6 +215,7 @@ class ComponentSettingsDialog(
         }
 
         val currentValue = component.settings.get(definition.key, definition.default)
+        val allowSystemColor = definition.key == "iconFrameBackgroundColor"
 
         val label = TextView(context).apply {
             text = definition.label
@@ -248,6 +250,37 @@ class ComponentSettingsDialog(
 
         val colorViews = mutableListOf<View>()
 
+        fun updateSelection(selected: View) {
+            colorViews.forEach { view ->
+                view.alpha = if (view == selected) 1.0f else 0.4f
+            }
+        }
+
+        if (allowSystemColor) {
+            val systemView = TextView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
+                    setMargins(dpToPx(4), 0, dpToPx(4), 0)
+                }
+                text = "SYS"
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setTextColor(Color.GRAY)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = dpToPx(6).toFloat()
+                    setStroke(dpToPx(1), Color.GRAY)
+                    setColor(ColorSettingUtils.resolveColor(context, ColorSettingUtils.COLOR_FOLLOW_SYSTEM))
+                }
+                alpha = if (currentValue == ColorSettingUtils.COLOR_FOLLOW_SYSTEM) 1.0f else 0.4f
+                setOnClickListener {
+                    pendingChanges[definition.key] = ColorSettingUtils.COLOR_FOLLOW_SYSTEM
+                    updateSelection(this)
+                }
+            }
+            colorViews.add(systemView)
+            colorContainer.addView(systemView)
+        }
+
         presetColors.forEach { color ->
             val colorView = View(context).apply {
                 layoutParams = LinearLayout.LayoutParams(dpToPx(40), dpToPx(40)).apply {
@@ -264,9 +297,7 @@ class ComponentSettingsDialog(
 
                 setOnClickListener {
                     pendingChanges[definition.key] = color
-                    colorViews.forEach { v ->
-                        v.alpha = if (v == this) 1.0f else 0.4f
-                    }
+                    updateSelection(this)
                 }
             }
             colorViews.add(colorView)

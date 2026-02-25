@@ -6,11 +6,14 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
+import android.content.res.ColorStateList
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.GestureDetector
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -19,9 +22,12 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.GestureDetectorCompat
@@ -39,10 +45,13 @@ import com.example.taglauncher.component.impl.SearchBarComponent
 import com.example.taglauncher.desktop.ComponentBounds
 import com.example.taglauncher.desktop.DesktopCanvasView
 import com.example.taglauncher.desktop.DesktopLayoutManager
+import com.example.taglauncher.AppIconOverride
+import com.example.taglauncher.AppIconEditContext
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.slider.Slider
 import java.lang.reflect.Method
 import kotlin.math.abs
 
@@ -85,6 +94,21 @@ class MainActivity : AppCompatActivity() {
     private val pagePreviewCache = mutableMapOf<Int, Bitmap>()
     private var pagePreviewSize: Pair<Int, Int>? = null
 
+    private var iconEditState: IconEditState? = null
+    private var iconEditUi: IconEditUi? = null
+
+    private val iconPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        handleIconPickResult(uri, IconPickTarget.ICON)
+    }
+
+    private val backgroundPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        handleIconPickResult(uri, IconPickTarget.BACKGROUND)
+    }
+
     private lateinit var preferencesManager: PreferencesManager
 
     private var allApps: List<AppInfo> = emptyList()
@@ -112,6 +136,30 @@ class MainActivity : AppCompatActivity() {
         @Volatile
         var isGlobalGestureDisabled = false
     }
+
+    private enum class IconPickTarget {
+        ICON,
+        BACKGROUND
+    }
+
+    private data class IconEditState(
+        val appInfo: AppInfo,
+        val editContext: AppIconEditContext,
+        var iconUri: String?,
+        var backgroundColor: Int?,
+        var backgroundImageUri: String?,
+        var scalePercent: Int,
+        var applyGlobal: Boolean
+    )
+
+    private data class IconEditUi(
+        val previewFrame: FrameLayout,
+        val previewBackground: ImageView,
+        val previewIcon: ImageView,
+        val scaleLabel: TextView,
+        val scaleSlider: Slider,
+        val applyGlobalCheck: CheckBox
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -261,6 +309,9 @@ class MainActivity : AppCompatActivity() {
                             component.handleTagsUpdated(appInfo)
                         }
                     }
+                }
+                component.onEditIcon = { appInfo, editContext ->
+                    showEditIconDialog(appInfo, editContext)
                 }
                 component.onManageTagsBatch = { apps ->
                     showBulkTagsDialog(
@@ -1917,6 +1968,406 @@ class MainActivity : AppCompatActivity() {
         }
 
         dialog.show()
+    }
+
+    private fun showEditIconDialog(appInfo: AppInfo, editContext: AppIconEditContext) {
+        val componentOverride = preferencesManager.getComponentIconOverride(editContext.componentId, appInfo.packageName)
+        val globalOverride = preferencesManager.getGlobalIconOverride(appInfo.packageName)
+        val initialOverride = componentOverride ?: globalOverride ?: AppIconOverride()
+        val applyGlobalDefault = componentOverride == null && globalOverride != null
+
+        val state = IconEditState(
+            appInfo = appInfo,
+            editContext = editContext,
+            iconUri = initialOverride.iconUri,
+            backgroundColor = initialOverride.backgroundColor,
+            backgroundImageUri = initialOverride.backgroundImageUri,
+            scalePercent = initialOverride.scalePercent,
+            applyGlobal = applyGlobalDefault
+        )
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(8))
+        }
+
+        val previewFrameSizePx = dpToPx(editContext.iconFrameSizeDp)
+        val previewFrame = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(previewFrameSizePx, previewFrameSizePx).apply {
+                gravity = Gravity.CENTER_HORIZONTAL
+                bottomMargin = dpToPx(16)
+            }
+            clipToOutline = true
+        }
+
+        val previewBackground = ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+        }
+
+        val previewIcon = ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+
+        previewFrame.addView(previewBackground)
+        previewFrame.addView(previewIcon)
+        container.addView(previewFrame)
+
+        val scaleLabel = TextView(this).apply {
+            textSize = 12f
+            setTextColor(android.graphics.Color.GRAY)
+            setPadding(0, 0, 0, dpToPx(6))
+        }
+        container.addView(scaleLabel)
+
+        val initialScale = state.scalePercent.coerceIn(50, 150)
+        state.scalePercent = initialScale
+        val scaleSlider = Slider(this).apply {
+            valueFrom = 50f
+            valueTo = 150f
+            stepSize = 1f
+            value = initialScale.toFloat()
+        }
+        container.addView(scaleSlider)
+
+        val applyGlobalCheck = CheckBox(this).apply {
+            text = "Apply globally"
+            isChecked = state.applyGlobal
+            setPadding(0, dpToPx(8), 0, dpToPx(8))
+            setOnCheckedChangeListener { _, isChecked ->
+                state.applyGlobal = isChecked
+            }
+        }
+        container.addView(applyGlobalCheck)
+
+        val iconButton = MaterialButton(this).apply {
+            text = "Change Icon"
+            setOnClickListener {
+                iconPickerLauncher.launch(arrayOf("image/*"))
+            }
+        }
+
+        val bgColorButton = MaterialButton(this).apply {
+            text = "Background Color"
+            setOnClickListener {
+                showIconBackgroundColorDialog(state)
+            }
+        }
+
+        val bgImageButton = MaterialButton(this).apply {
+            text = "Background Image"
+            setOnClickListener {
+                backgroundPickerLauncher.launch(arrayOf("image/*"))
+            }
+        }
+
+        val clearBgButton = MaterialButton(this).apply {
+            text = "Clear Background"
+            setOnClickListener {
+                state.backgroundColor = null
+                state.backgroundImageUri = null
+                updateIconPreview(state)
+            }
+        }
+
+        val resetIconButton = MaterialButton(this).apply {
+            text = "Reset Icon"
+            setOnClickListener {
+                state.iconUri = null
+                updateIconPreview(state)
+            }
+        }
+
+        container.addView(iconButton)
+        container.addView(bgColorButton)
+        container.addView(bgImageButton)
+        container.addView(clearBgButton)
+        container.addView(resetIconButton)
+
+        val ui = IconEditUi(
+            previewFrame = previewFrame,
+            previewBackground = previewBackground,
+            previewIcon = previewIcon,
+            scaleLabel = scaleLabel,
+            scaleSlider = scaleSlider,
+            applyGlobalCheck = applyGlobalCheck
+        )
+
+        scaleSlider.addOnChangeListener { _, value, _ ->
+            state.scalePercent = value.toInt()
+            updateIconPreview(state)
+        }
+
+        iconEditState = state
+        iconEditUi = ui
+        updateIconPreview(state)
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Edit Icon")
+            .setView(container)
+            .setPositiveButton("Save") { _, _ ->
+                val override = AppIconOverride(
+                    iconUri = state.iconUri,
+                    backgroundColor = state.backgroundColor,
+                    backgroundImageUri = state.backgroundImageUri,
+                    scalePercent = state.scalePercent
+                )
+                if (state.applyGlobal) {
+                    preferencesManager.setGlobalIconOverride(appInfo.packageName, override)
+                    preferencesManager.setComponentIconOverride(editContext.componentId, appInfo.packageName, null)
+                } else {
+                    preferencesManager.setComponentIconOverride(editContext.componentId, appInfo.packageName, override)
+                }
+                refreshComponents()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+
+        dialog.setOnDismissListener {
+            iconEditState = null
+            iconEditUi = null
+        }
+
+        dialog.show()
+    }
+
+    private fun showIconBackgroundColorDialog(state: IconEditState) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12))
+        }
+
+        val gradientWrapper = FrameLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(32)
+            )
+        }
+
+        val gradientBar = View(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(16),
+                Gravity.CENTER
+            )
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(
+                    android.graphics.Color.RED,
+                    android.graphics.Color.YELLOW,
+                    android.graphics.Color.GREEN,
+                    android.graphics.Color.CYAN,
+                    android.graphics.Color.BLUE,
+                    android.graphics.Color.MAGENTA,
+                    android.graphics.Color.RED
+                )
+            ).apply {
+                cornerRadius = dpToPx(8).toFloat()
+            }
+        }
+
+        val hsv = FloatArray(3)
+        val hasInitialColor = state.backgroundColor?.let { color ->
+            android.graphics.Color.colorToHSV(color, hsv)
+            true
+        } ?: false
+        var currentHue = if (hasInitialColor) hsv[0] else 0f
+        var currentSaturation = if (hasInitialColor) hsv[1] else 1f
+        var currentValue = if (hasInitialColor) hsv[2] else 1f
+
+        val hueSlider = Slider(this).apply {
+            valueFrom = 0f
+            valueTo = 360f
+            stepSize = 1f
+            value = currentHue
+            trackActiveTintList = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+            trackInactiveTintList = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
+        }
+
+        hueSlider.addOnChangeListener { _, value, _ ->
+            currentHue = value
+            val color = android.graphics.Color.HSVToColor(floatArrayOf(currentHue, currentSaturation, currentValue))
+            state.backgroundColor = color
+            state.backgroundImageUri = null
+            updateIconPreview(state)
+        }
+
+        gradientWrapper.addView(gradientBar)
+        gradientWrapper.addView(hueSlider)
+        container.addView(gradientWrapper)
+
+        val saturationLabel = TextView(this).apply {
+            text = "Saturation: ${(currentSaturation * 100).toInt()}%"
+            textSize = 12f
+            setTextColor(android.graphics.Color.GRAY)
+            setPadding(0, dpToPx(10), 0, dpToPx(4))
+        }
+        container.addView(saturationLabel)
+
+        val saturationSlider = Slider(this).apply {
+            valueFrom = 0f
+            valueTo = 1f
+            stepSize = 0.01f
+            value = currentSaturation
+        }
+        saturationSlider.addOnChangeListener { _, value, _ ->
+            currentSaturation = value
+            saturationLabel.text = "Saturation: ${(currentSaturation * 100).toInt()}%"
+            val color = android.graphics.Color.HSVToColor(floatArrayOf(currentHue, currentSaturation, currentValue))
+            state.backgroundColor = color
+            state.backgroundImageUri = null
+            updateIconPreview(state)
+        }
+        container.addView(saturationSlider)
+
+        val valueLabel = TextView(this).apply {
+            text = "Brightness: ${(currentValue * 100).toInt()}%"
+            textSize = 12f
+            setTextColor(android.graphics.Color.GRAY)
+            setPadding(0, dpToPx(10), 0, dpToPx(4))
+        }
+        container.addView(valueLabel)
+
+        val valueSlider = Slider(this).apply {
+            valueFrom = 0f
+            valueTo = 1f
+            stepSize = 0.01f
+            value = currentValue
+        }
+        valueSlider.addOnChangeListener { _, value, _ ->
+            currentValue = value
+            valueLabel.text = "Brightness: ${(currentValue * 100).toInt()}%"
+            val color = android.graphics.Color.HSVToColor(floatArrayOf(currentHue, currentSaturation, currentValue))
+            state.backgroundColor = color
+            state.backgroundImageUri = null
+            updateIconPreview(state)
+        }
+        container.addView(valueSlider)
+
+        val clearButton = TextView(this).apply {
+            text = "Clear"
+            textSize = 12f
+            setTextColor(android.graphics.Color.GRAY)
+            gravity = Gravity.CENTER
+            setPadding(0, dpToPx(8), 0, 0)
+            setOnClickListener {
+                state.backgroundColor = null
+                state.backgroundImageUri = null
+                updateIconPreview(state)
+            }
+        }
+        container.addView(clearButton)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Background Color")
+            .setView(container)
+            .setPositiveButton("Close", null)
+            .show()
+    }
+
+    private fun handleIconPickResult(uri: Uri?, target: IconPickTarget) {
+        val state = iconEditState ?: return
+        if (uri == null) return
+        persistUriPermission(uri)
+        when (target) {
+            IconPickTarget.ICON -> state.iconUri = uri.toString()
+            IconPickTarget.BACKGROUND -> {
+                state.backgroundImageUri = uri.toString()
+                state.backgroundColor = null
+            }
+        }
+        updateIconPreview(state)
+    }
+
+    private fun updateIconPreview(state: IconEditState) {
+        val ui = iconEditUi ?: return
+        val frameSizePx = dpToPx(state.editContext.iconFrameSizeDp)
+        val iconSizeDp = state.editContext.iconSizeDp
+        val scaledIconSizeDp = (iconSizeDp * (state.scalePercent / 100f)).toInt().coerceAtLeast(1)
+        val iconSizePx = dpToPx(scaledIconSizeDp)
+
+        ui.scaleLabel.text = "Icon Scale: ${state.scalePercent}%"
+
+        ui.previewFrame.layoutParams = LinearLayout.LayoutParams(frameSizePx, frameSizePx).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dpToPx(16)
+        }
+        applyIconFrameShape(ui.previewFrame, frameSizePx, state.editContext.iconShape)
+
+        ui.previewIcon.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
+
+        if (state.backgroundImageUri != null) {
+            ui.previewBackground.visibility = View.VISIBLE
+            ui.previewBackground.setImageURI(Uri.parse(state.backgroundImageUri))
+        } else {
+            ui.previewBackground.setImageDrawable(null)
+            ui.previewBackground.visibility = View.GONE
+        }
+
+        if (state.backgroundColor != null) {
+            ui.previewFrame.setBackgroundColor(state.backgroundColor!!)
+        } else {
+            ui.previewFrame.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        }
+
+        if (state.iconUri != null) {
+            ui.previewIcon.setImageURI(Uri.parse(state.iconUri))
+        } else {
+            ui.previewIcon.setImageDrawable(state.appInfo.icon)
+        }
+    }
+
+    private fun applyIconFrameShape(targetView: View, sizePx: Int, shape: String) {
+        when (shape) {
+            "circle" -> {
+                targetView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        outline.setOval(0, 0, sizePx, sizePx)
+                    }
+                }
+                targetView.clipToOutline = true
+            }
+            "rounded" -> {
+                targetView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        val cornerRadius = sizePx * 0.2f
+                        outline.setRoundRect(0, 0, sizePx, sizePx, cornerRadius)
+                    }
+                }
+                targetView.clipToOutline = true
+            }
+            "square" -> {
+                targetView.outlineProvider = object : android.view.ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: android.graphics.Outline) {
+                        outline.setRect(0, 0, sizePx, sizePx)
+                    }
+                }
+                targetView.clipToOutline = true
+            }
+            else -> {
+                targetView.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+                targetView.clipToOutline = false
+            }
+        }
+    }
+
+    private fun persistUriPermission(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+        }
     }
 
     private fun showCreateTagDialog(onTagCreated: (TagItem?) -> Unit, existingTag: TagItem? = null) {

@@ -25,6 +25,8 @@ import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Locale
+import com.example.taglauncher.AppIconOverride
+import com.example.taglauncher.ColorSettingUtils
 
 class AppAdapter(
     private val context: Context,
@@ -32,8 +34,11 @@ class AppAdapter(
     private val onAppClick: (AppInfo) -> Unit,
     private val onHideApp: ((AppInfo) -> Unit)? = null,
     private val onManageTags: ((AppInfo) -> Unit)? = null,
+    private val onEditIcon: ((AppInfo) -> Unit)? = null,
     private val getDescription: ((AppInfo) -> String?)? = null,
     private val setDescription: ((AppInfo, String) -> Unit)? = null,
+    private val getIconOverride: ((String) -> AppIconOverride?)? = null,
+    private var iconFrameBackgroundColor: Int = Color.TRANSPARENT,
     private var showLabels: Boolean = true,
     private var iconFrameSizeDp: Int = 48,
     private var iconSizeDp: Int = 48
@@ -58,6 +63,7 @@ class AppAdapter(
 
     class AppViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val appIconFrame: FrameLayout = itemView.findViewById(R.id.appIconFrame)
+        val appIconBackground: ImageView = itemView.findViewById(R.id.appIconBackground)
         val appIcon: ImageView = itemView.findViewById(R.id.appIcon)
         val appLabel: TextView = itemView.findViewById(R.id.appLabel)
         val selectionOverlay: View = itemView.findViewById(R.id.appSelectionOverlay)
@@ -73,15 +79,16 @@ class AppAdapter(
     override fun onBindViewHolder(holder: AppViewHolder, position: Int) {
         val appInfo = filteredList[position]
         val isSelected = selectedPackages.contains(appInfo.packageName)
-        holder.appIcon.setImageDrawable(appInfo.icon)
-
+        val iconOverride = getIconOverride?.invoke(appInfo.packageName)
+        val scalePercent = (iconOverride?.scalePercent ?: 100).coerceIn(50, 150)
         // Apply icon frame size
         val iconFrameSizePx = (iconFrameSizeDp * density).toInt()
         holder.appIconFrame.layoutParams.width = iconFrameSizePx
         holder.appIconFrame.layoutParams.height = iconFrameSizePx
 
         // Apply icon size
-        val iconSizePx = (iconSizeDp * density).toInt()
+        val scaledIconSizeDp = (iconSizeDp * (scalePercent / 100f)).toInt().coerceAtLeast(1)
+        val iconSizePx = (scaledIconSizeDp * density).toInt()
         holder.appIcon.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
 
         // Apply icon padding
@@ -90,6 +97,35 @@ class AppAdapter(
 
         // Apply icon shape clipping
         applyIconShape(holder.appIconFrame, iconFrameSizePx)
+
+        val bgImageUri = iconOverride?.backgroundImageUri
+        holder.appIconBackground.setImageDrawable(null)
+        if (bgImageUri != null) {
+            holder.appIconBackground.visibility = View.VISIBLE
+            holder.appIconBackground.setImageURI(Uri.parse(bgImageUri))
+        } else {
+            holder.appIconBackground.visibility = View.GONE
+        }
+
+        val bgColor = iconOverride?.backgroundColor
+        val hasBgImage = iconOverride?.backgroundImageUri != null
+        val resolvedFrameColor = ColorSettingUtils.resolveColor(context, iconFrameBackgroundColor)
+        val fallbackColor = resolvedFrameColor.takeIf { it != Color.TRANSPARENT }
+        val finalBgColor = when {
+            bgColor != null -> bgColor
+            hasBgImage -> Color.TRANSPARENT
+            fallbackColor != null -> fallbackColor
+            else -> Color.TRANSPARENT
+        }
+        holder.appIconFrame.setBackgroundColor(finalBgColor)
+
+        val iconUri = iconOverride?.iconUri
+        holder.appIcon.setImageDrawable(null)
+        if (iconUri != null) {
+            holder.appIcon.setImageURI(Uri.parse(iconUri))
+        } else {
+            holder.appIcon.setImageDrawable(appInfo.icon)
+        }
 
         // Apply label styling
         if (showLabels) {
@@ -239,6 +275,9 @@ class AppAdapter(
             addAction("Select") {
                 startSelection(appInfo)
             }
+        }
+        if (onEditIcon != null) {
+            addAction("Edit Icon") { onEditIcon.invoke(appInfo) }
         }
         if (onManageTags != null) {
             addAction(context.getString(R.string.tags)) { onManageTags.invoke(appInfo) }
@@ -434,6 +473,11 @@ class AppAdapter(
 
     fun setIconPadding(paddingDp: Int) {
         iconPaddingDp = paddingDp
+        notifyDataSetChanged()
+    }
+
+    fun setIconFrameBackgroundColor(color: Int) {
+        iconFrameBackgroundColor = color
         notifyDataSetChanged()
     }
 

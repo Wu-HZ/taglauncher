@@ -17,7 +17,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.example.taglauncher.ColorSettingUtils
 import com.example.taglauncher.AppInfo
+import com.example.taglauncher.AppIconOverride
 import com.example.taglauncher.MainActivity
 import com.example.taglauncher.PreferencesManager
 import com.example.taglauncher.component.BaseDesktopComponent
@@ -194,6 +196,7 @@ class AppGridComponent(
             context = context,
             gridCells = gridCells,
             iconSizeDp = getSetting("iconSize", 48),
+            iconFrameBackgroundColor = getSetting("iconFrameBackgroundColor", Color.TRANSPARENT),
             showLabels = getSetting("showLabels", true),
             allAppsProvider = { allAppsProvider?.invoke() ?: emptyList() },
             isEditMode = { isInEditMode },
@@ -219,6 +222,9 @@ class AppGridComponent(
                 } else {
                     false
                 }
+            },
+            iconOverrideProvider = { packageName ->
+                preferencesManager.getEffectiveIconOverride(componentId, packageName)
             }
         )
 
@@ -490,6 +496,12 @@ class AppGridComponent(
                 step = 4
             ),
             SettingDefinition.Color(
+                key = "iconFrameBackgroundColor",
+                label = "Icon Frame Background",
+                description = "Background color for transparent icons",
+                default = Color.TRANSPARENT
+            ),
+            SettingDefinition.Color(
                 key = "backgroundColor",
                 label = "Background Color",
                 description = "Background color of the grid",
@@ -541,6 +553,12 @@ class AppGridComponent(
                 val iconSize = (value as? Int) ?: 48
                 if (::gridAdapter.isInitialized) {
                     gridAdapter.setIconSize(iconSize)
+                }
+            }
+            "iconFrameBackgroundColor" -> {
+                val color = (value as? Int) ?: Color.TRANSPARENT
+                if (::gridAdapter.isInitialized) {
+                    gridAdapter.setIconFrameBackgroundColor(color)
                 }
             }
             "backgroundColor", "cornerRadius" -> {
@@ -609,23 +627,28 @@ class AppGridComponent(
         private val context: Context,
         private var gridCells: MutableList<GridCellConfig>,
         private var iconSizeDp: Int,
+        private var iconFrameBackgroundColor: Int,
         private var showLabels: Boolean,
         private val allAppsProvider: () -> List<AppInfo>,
         private val isEditMode: () -> Boolean,
         private val onCellClick: (Int) -> Unit,
         private val onCellGesture: (Int, GestureType) -> Boolean,  // Returns true if gesture was handled
-        private val onCellLongClick: (Int) -> Boolean
+        private val onCellLongClick: (Int) -> Boolean,
+        private val iconOverrideProvider: (String) -> AppIconOverride?
     ) : RecyclerView.Adapter<CustomGridAdapter.ViewHolder>() {
 
         private val density = context.resources.displayMetrics.density
         private var showGestureIndicator = true
 
-        inner class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-            val iconView: ImageView = itemView.findViewById(android.R.id.icon)
-            val labelView: TextView = itemView.findViewById(android.R.id.text1)
-            val addIcon: TextView = itemView.findViewById(android.R.id.text2)
-            val gestureIndicator: View = itemView.findViewById(android.R.id.icon1)
-        }
+        inner class ViewHolder(
+            itemView: View,
+            val iconFrame: FrameLayout,
+            val iconBackground: ImageView,
+            val iconView: ImageView,
+            val labelView: TextView,
+            val addIcon: TextView,
+            val gestureIndicator: View
+        ) : RecyclerView.ViewHolder(itemView)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
             val container = FrameLayout(context).apply {
@@ -645,9 +668,23 @@ class AppGridComponent(
                 setPadding(8.dp, 12.dp, 8.dp, 12.dp)
             }
 
+            val iconFrame = FrameLayout(context).apply {
+                layoutParams = LinearLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp)
+                clipToOutline = true
+            }
+
+            val iconBackground = ImageView(context).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                visibility = View.GONE
+            }
+
             val iconView = ImageView(context).apply {
                 id = android.R.id.icon
-                layoutParams = LinearLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp)
+                layoutParams = FrameLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp, Gravity.CENTER)
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
 
@@ -691,14 +728,16 @@ class AppGridComponent(
                 visibility = View.GONE
             }
 
-            innerContainer.addView(iconView)
+            iconFrame.addView(iconBackground)
+            iconFrame.addView(iconView)
+            innerContainer.addView(iconFrame)
             innerContainer.addView(addIcon)
             innerContainer.addView(labelView)
 
             container.addView(innerContainer)
             container.addView(gestureIndicator)
 
-            return ViewHolder(container)
+            return ViewHolder(container, iconFrame, iconBackground, iconView, labelView, addIcon, gestureIndicator)
         }
 
         @SuppressLint("ClickableViewAccessibility")
@@ -710,7 +749,7 @@ class AppGridComponent(
 
             if (!hasMainApp) {
                 // Show "+" placeholder
-                holder.iconView.visibility = View.GONE
+                holder.iconFrame.visibility = View.GONE
                 holder.addIcon.visibility = if (inEditMode || hasGestures) View.VISIBLE else View.INVISIBLE
                 holder.labelView.visibility = View.GONE
 
@@ -725,12 +764,49 @@ class AppGridComponent(
             } else {
                 // Show app
                 holder.addIcon.visibility = View.GONE
-                holder.iconView.visibility = View.VISIBLE
+                holder.iconFrame.visibility = View.VISIBLE
                 holder.labelView.visibility = if (showLabels) View.VISIBLE else View.GONE
 
                 val appInfo = allAppsProvider().find { it.packageName == cell.mainApp }
+                val iconOverride = iconOverrideProvider.invoke(cell.mainApp) ?: AppIconOverride()
+                val scalePercent = iconOverride.scalePercent.coerceIn(50, 150)
+                val scaledIconSize = (iconSizeDp * (scalePercent / 100f)).toInt().coerceAtLeast(1)
+
+                holder.iconFrame.layoutParams = LinearLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp)
+                holder.iconView.layoutParams = FrameLayout.LayoutParams(
+                    scaledIconSize.dp,
+                    scaledIconSize.dp,
+                    Gravity.CENTER
+                )
+
+                val bgImageUri = iconOverride.backgroundImageUri
+                holder.iconBackground.setImageDrawable(null)
+                if (bgImageUri != null) {
+                    holder.iconBackground.visibility = View.VISIBLE
+                    holder.iconBackground.setImageURI(android.net.Uri.parse(bgImageUri))
+                } else {
+                    holder.iconBackground.visibility = View.GONE
+                }
+
+                val bgColor = iconOverride.backgroundColor
+                val hasBgImage = iconOverride.backgroundImageUri != null
+                val resolvedFrameColor = ColorSettingUtils.resolveColor(context, iconFrameBackgroundColor)
+                val fallbackColor = resolvedFrameColor.takeIf { it != Color.TRANSPARENT }
+                val finalBgColor = when {
+                    bgColor != null -> bgColor
+                    hasBgImage -> Color.TRANSPARENT
+                    fallbackColor != null -> fallbackColor
+                    else -> Color.TRANSPARENT
+                }
+                holder.iconFrame.setBackgroundColor(finalBgColor)
+
                 if (appInfo != null) {
-                    holder.iconView.setImageDrawable(appInfo.icon)
+                    holder.iconView.setImageDrawable(null)
+                    if (iconOverride.iconUri != null) {
+                        holder.iconView.setImageURI(android.net.Uri.parse(iconOverride.iconUri))
+                    } else {
+                        holder.iconView.setImageDrawable(appInfo.icon)
+                    }
                     holder.labelView.text = appInfo.label
                 } else {
                     holder.iconView.setImageResource(android.R.drawable.sym_def_app_icon)
@@ -743,7 +819,6 @@ class AppGridComponent(
                 if (showGestureIndicator && hasGestures && !inEditMode) View.VISIBLE else View.GONE
 
             // Update icon size
-            holder.iconView.layoutParams = LinearLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp)
             holder.addIcon.layoutParams = LinearLayout.LayoutParams(iconSizeDp.dp, iconSizeDp.dp)
 
             // Setup touch handling with drag animation
@@ -973,6 +1048,11 @@ class AppGridComponent(
 
         fun setIconSize(sizeDp: Int) {
             iconSizeDp = sizeDp
+            notifyDataSetChanged()
+        }
+
+        fun setIconFrameBackgroundColor(color: Int) {
+            iconFrameBackgroundColor = color
             notifyDataSetChanged()
         }
 

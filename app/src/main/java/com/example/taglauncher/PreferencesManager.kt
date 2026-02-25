@@ -34,6 +34,8 @@ class PreferencesManager(context: Context) {
 
         // App Descriptions
         private const val KEY_APP_DESCRIPTIONS = "app_descriptions"
+        private const val KEY_APP_ICON_OVERRIDES_GLOBAL = "app_icon_overrides_global"
+        private const val KEY_APP_ICON_OVERRIDES_BY_COMPONENT = "app_icon_overrides_by_component"
 
         // Tag Button
         private const val KEY_TAG_BUTTON_POSITION = "tag_button_position"
@@ -258,6 +260,102 @@ class PreferencesManager(context: Context) {
             descriptions[packageName] = description
         }
         saveAppDescriptions(descriptions)
+    }
+
+    // ==================== App Icon Overrides ====================
+
+    private fun parseIconOverride(json: JSONObject): AppIconOverride {
+        val iconUri = json.optString("iconUri", "").takeIf { it.isNotBlank() }
+        val bgImageUri = json.optString("bgImageUri", "").takeIf { it.isNotBlank() }
+        val hasBgColor = json.has("bgColor")
+        val bgColor = if (hasBgColor) json.optInt("bgColor") else null
+        val scalePercent = json.optInt("scalePercent", 100)
+        return AppIconOverride(
+            iconUri = iconUri,
+            backgroundColor = bgColor,
+            backgroundImageUri = bgImageUri,
+            scalePercent = scalePercent
+        )
+    }
+
+    private fun encodeIconOverride(override: AppIconOverride): JSONObject {
+        return JSONObject().apply {
+            override.iconUri?.let { put("iconUri", it) }
+            override.backgroundImageUri?.let { put("bgImageUri", it) }
+            override.backgroundColor?.let { put("bgColor", it) }
+            if (override.scalePercent != 100) {
+                put("scalePercent", override.scalePercent)
+            }
+        }
+    }
+
+    private fun getGlobalIconOverridesJson(): JSONObject {
+        val json = prefs.getString(KEY_APP_ICON_OVERRIDES_GLOBAL, "{}") ?: "{}"
+        return try {
+            JSONObject(json)
+        } catch (e: Exception) {
+            JSONObject()
+        }
+    }
+
+    private fun saveGlobalIconOverridesJson(jsonObject: JSONObject) {
+        prefs.edit().putString(KEY_APP_ICON_OVERRIDES_GLOBAL, jsonObject.toString()).apply()
+    }
+
+    fun getGlobalIconOverride(packageName: String): AppIconOverride? {
+        val json = getGlobalIconOverridesJson()
+        val overrideJson = json.optJSONObject(packageName) ?: return null
+        return parseIconOverride(overrideJson)
+    }
+
+    fun setGlobalIconOverride(packageName: String, override: AppIconOverride?) {
+        val json = getGlobalIconOverridesJson()
+        if (override == null || override.isEmpty()) {
+            json.remove(packageName)
+        } else {
+            json.put(packageName, encodeIconOverride(override))
+        }
+        saveGlobalIconOverridesJson(json)
+    }
+
+    private fun getComponentIconOverridesJson(): JSONObject {
+        val json = prefs.getString(KEY_APP_ICON_OVERRIDES_BY_COMPONENT, "{}") ?: "{}"
+        return try {
+            JSONObject(json)
+        } catch (e: Exception) {
+            JSONObject()
+        }
+    }
+
+    private fun saveComponentIconOverridesJson(jsonObject: JSONObject) {
+        prefs.edit().putString(KEY_APP_ICON_OVERRIDES_BY_COMPONENT, jsonObject.toString()).apply()
+    }
+
+    fun getComponentIconOverride(componentId: String, packageName: String): AppIconOverride? {
+        val json = getComponentIconOverridesJson()
+        val componentJson = json.optJSONObject(componentId) ?: return null
+        val overrideJson = componentJson.optJSONObject(packageName) ?: return null
+        return parseIconOverride(overrideJson)
+    }
+
+    fun setComponentIconOverride(componentId: String, packageName: String, override: AppIconOverride?) {
+        val json = getComponentIconOverridesJson()
+        val componentJson = json.optJSONObject(componentId) ?: JSONObject()
+        if (override == null || override.isEmpty()) {
+            componentJson.remove(packageName)
+        } else {
+            componentJson.put(packageName, encodeIconOverride(override))
+        }
+        if (componentJson.length() == 0) {
+            json.remove(componentId)
+        } else {
+            json.put(componentId, componentJson)
+        }
+        saveComponentIconOverridesJson(json)
+    }
+
+    fun getEffectiveIconOverride(componentId: String, packageName: String): AppIconOverride? {
+        return getComponentIconOverride(componentId, packageName) ?: getGlobalIconOverride(packageName)
     }
 
     // ==================== Tag Button ====================
