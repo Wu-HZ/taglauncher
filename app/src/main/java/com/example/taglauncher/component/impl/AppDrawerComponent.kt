@@ -8,6 +8,8 @@ import android.view.View
 import android.view.ViewTreeObserver
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.example.taglauncher.AppAdapter
 import com.example.taglauncher.AppInfo
 import com.example.taglauncher.GridSpacingItemDecoration
@@ -27,23 +29,32 @@ class AppDrawerComponent(
     componentId: String,
     bounds: ComponentBounds,
     settings: ComponentSettings,
-    private val preferencesManager: PreferencesManager
-) : BaseDesktopComponent(context, componentId, ComponentType.APP_DRAWER, bounds, settings) {
+    private val preferencesManager: PreferencesManager,
+    componentType: ComponentType = ComponentType.APP_DRAWER,
+    private val removeOnTagChange: Boolean = false
+) : BaseDesktopComponent(context, componentId, componentType, bounds, settings) {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var appAdapter: AppAdapter
     private var containerView: View? = null
     private var itemDecoration: GridSpacingItemDecoration? = null
+    private var selectionBar: MaterialCardView? = null
+    private var selectionCountText: android.widget.TextView? = null
+    private var selectionAllButton: MaterialButton? = null
+    private var selectionTagsButton: MaterialButton? = null
+    private var selectionCancelButton: MaterialButton? = null
 
     private var allApps: List<AppInfo> = emptyList()
     private var visibleApps: List<AppInfo> = emptyList()
     private var currentFilterTag: String? = null
     private var allAppsProvider: (() -> List<AppInfo>)? = null
+    private val excludedPackages = loadExcludedPackages()
 
     // Callbacks for external handling
     var onAppClick: ((AppInfo) -> Unit)? = null
     var onHideApp: ((AppInfo) -> Unit)? = null
     var onManageTags: ((AppInfo) -> Unit)? = null
+    var onManageTagsBatch: ((List<AppInfo>) -> Unit)? = null
 
     /**
      * Set the provider for all installed apps.
@@ -67,6 +78,7 @@ class AppDrawerComponent(
         }
 
         container.addView(recyclerView)
+        setupSelectionBar(container)
         containerView = container
 
         return container
@@ -118,6 +130,9 @@ class AppDrawerComponent(
             showLabels = getSetting("showLabels", true),
             iconSizeDp = getSetting("iconSize", 48)
         )
+        appAdapter.onSelectionChanged = { count ->
+            updateSelectionBar(count)
+        }
 
         // Apply additional style settings
         appAdapter.setIconShape(getSetting("iconShape", "default"))
@@ -131,6 +146,97 @@ class AppDrawerComponent(
 
         // Apply maxRows limiting if set
         applyMaxRowsLimit()
+    }
+
+    private fun setupSelectionBar(container: android.widget.FrameLayout) {
+        val bar = MaterialCardView(context).apply {
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                val margin = dpToPx(8f)
+                setMargins(margin, margin, margin, margin)
+            }
+            setCardBackgroundColor(Color.parseColor("#E0000000"))
+            cardElevation = dpToPx(4f).toFloat()
+            radius = dpToPx(14f).toFloat()
+            visibility = View.GONE
+        }
+
+        val row = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(12f), dpToPx(8f), dpToPx(12f), dpToPx(8f))
+        }
+
+        val countText = android.widget.TextView(context).apply {
+            text = "Selected 0"
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                0,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        }
+
+        val tagsButton = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Tags"
+            setTextColor(Color.WHITE)
+        }
+
+        val allButton = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "All"
+            setTextColor(Color.WHITE)
+        }
+
+        val cancelButton = MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Cancel"
+            setTextColor(Color.WHITE)
+        }
+
+        allButton.setOnClickListener {
+            appAdapter.selectAllVisible()
+        }
+
+        tagsButton.setOnClickListener {
+            val selected = appAdapter.getSelectedApps()
+            if (selected.isNotEmpty()) {
+                onManageTagsBatch?.invoke(selected)
+            }
+        }
+
+        cancelButton.setOnClickListener {
+            appAdapter.clearSelection()
+        }
+
+        row.addView(countText)
+        row.addView(allButton)
+        row.addView(tagsButton)
+        row.addView(cancelButton)
+        bar.addView(row)
+        container.addView(bar)
+
+        selectionBar = bar
+        selectionCountText = countText
+        selectionAllButton = allButton
+        selectionTagsButton = tagsButton
+        selectionCancelButton = cancelButton
+    }
+
+    private fun updateSelectionBar(count: Int) {
+        selectionCountText?.text = "Selected $count"
+        selectionBar?.visibility = if (count > 0) View.VISIBLE else View.GONE
+    }
+
+    fun clearSelection() {
+        if (::appAdapter.isInitialized) {
+            appAdapter.clearSelection()
+        }
+    }
+
+    fun hasSelection(): Boolean {
+        return ::appAdapter.isInitialized && appAdapter.hasSelection()
     }
 
     private fun loadApps() {
@@ -162,11 +268,16 @@ class AppDrawerComponent(
         val hiddenApps = preferencesManager.getHiddenApps()
         val baseApps = allApps.filter { !hiddenApps.contains(it.packageName) }
 
-        visibleApps = if (currentFilterTag == null) {
+        val filteredApps = if (currentFilterTag == null) {
             baseApps
         } else {
             val taggedPackages = preferencesManager.getAppsWithTag(currentFilterTag!!)
             baseApps.filter { taggedPackages.contains(it.packageName) }
+        }
+        visibleApps = if (removeOnTagChange) {
+            filteredApps.filter { !excludedPackages.contains(it.packageName) }
+        } else {
+            filteredApps
         }
     }
 
@@ -211,10 +322,46 @@ class AppDrawerComponent(
         }
     }
 
+    fun handleTagsUpdated(appInfo: AppInfo) {
+        if (!removeOnTagChange) return
+        if (excludedPackages.add(appInfo.packageName)) {
+            setSetting("excludedPackages", excludedPackages.joinToString(","))
+            reloadVisibleApps()
+            if (::appAdapter.isInitialized) {
+                appAdapter.updateList(visibleApps)
+            }
+        }
+    }
+
+    fun handleTagsUpdated(apps: List<AppInfo>) {
+        if (!removeOnTagChange) return
+        var changed = false
+        apps.forEach { appInfo ->
+            if (excludedPackages.add(appInfo.packageName)) {
+                changed = true
+            }
+        }
+        if (changed) {
+            setSetting("excludedPackages", excludedPackages.joinToString(","))
+            reloadVisibleApps()
+            if (::appAdapter.isInitialized) {
+                appAdapter.updateList(visibleApps)
+            }
+        }
+    }
+
     /**
      * Get all visible apps.
      */
     fun getVisibleApps(): List<AppInfo> = visibleApps
+
+    private fun loadExcludedPackages(): MutableSet<String> {
+        val raw = getSetting("excludedPackages", "")
+        return raw.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toMutableSet()
+    }
 
     override fun getSettingsSchema(): List<SettingDefinition> {
         return listOf(

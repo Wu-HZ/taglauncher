@@ -45,10 +45,16 @@ class AppAdapter(
     private var labelMarginTopDp: Int = 4
 
     private val density = context.resources.displayMetrics.density
+    private val selectedPackages = mutableSetOf<String>()
+    private var selectionMode = false
+
+    var onSelectionChanged: ((Int) -> Unit)? = null
 
     class AppViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val appIcon: ImageView = itemView.findViewById(R.id.appIcon)
         val appLabel: TextView = itemView.findViewById(R.id.appLabel)
+        val selectionOverlay: View = itemView.findViewById(R.id.appSelectionOverlay)
+        val selectionCheck: ImageView = itemView.findViewById(R.id.appSelectionCheck)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AppViewHolder {
@@ -59,6 +65,7 @@ class AppAdapter(
 
     override fun onBindViewHolder(holder: AppViewHolder, position: Int) {
         val appInfo = filteredList[position]
+        val isSelected = selectedPackages.contains(appInfo.packageName)
         holder.appIcon.setImageDrawable(appInfo.icon)
 
         // Apply icon size
@@ -91,12 +98,23 @@ class AppAdapter(
             holder.appLabel.visibility = View.GONE
         }
 
+        holder.selectionOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
+        holder.selectionCheck.visibility = if (isSelected) View.VISIBLE else View.GONE
+
         holder.itemView.setOnClickListener {
-            onAppClick(appInfo)
+            if (selectionMode) {
+                toggleSelection(appInfo)
+            } else {
+                onAppClick(appInfo)
+            }
         }
 
         holder.itemView.setOnLongClickListener {
-            showContextMenu(appInfo)
+            if (selectionMode) {
+                toggleSelection(appInfo)
+            } else {
+                showContextMenu(appInfo)
+            }
             true
         }
     }
@@ -201,6 +219,11 @@ class AppAdapter(
             actionsContainer.addView(item)
         }
 
+        if (onSelectionChanged != null) {
+            addAction("Select") {
+                startSelection(appInfo)
+            }
+        }
         if (onManageTags != null) {
             addAction(context.getString(R.string.tags)) { onManageTags.invoke(appInfo) }
         }
@@ -264,7 +287,62 @@ class AppAdapter(
     fun updateList(newList: List<AppInfo>) {
         appList = newList
         filteredList = newList
+        if (selectedPackages.isNotEmpty()) {
+            val validPackages = newList.map { it.packageName }.toSet()
+            selectedPackages.retainAll(validPackages)
+            selectionMode = selectedPackages.isNotEmpty()
+            onSelectionChanged?.invoke(selectedPackages.size)
+        }
         notifyDataSetChanged()
+    }
+
+    fun getSelectedApps(): List<AppInfo> {
+        if (selectedPackages.isEmpty()) return emptyList()
+        return appList.filter { selectedPackages.contains(it.packageName) }
+    }
+
+    fun hasSelection(): Boolean {
+        return selectedPackages.isNotEmpty()
+    }
+
+    fun clearSelection() {
+        if (selectedPackages.isEmpty()) return
+        selectedPackages.clear()
+        selectionMode = false
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(0)
+    }
+
+    fun selectAllVisible() {
+        if (filteredList.isEmpty()) return
+        selectedPackages.clear()
+        filteredList.forEach { app -> selectedPackages.add(app.packageName) }
+        selectionMode = selectedPackages.isNotEmpty()
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(selectedPackages.size)
+    }
+
+    private fun startSelection(appInfo: AppInfo) {
+        selectionMode = true
+        selectedPackages.clear()
+        selectedPackages.add(appInfo.packageName)
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(selectedPackages.size)
+    }
+
+    private fun toggleSelection(appInfo: AppInfo) {
+        if (selectedPackages.contains(appInfo.packageName)) {
+            selectedPackages.remove(appInfo.packageName)
+        } else {
+            selectedPackages.add(appInfo.packageName)
+        }
+        if (selectedPackages.isEmpty()) {
+            selectionMode = false
+        } else {
+            selectionMode = true
+        }
+        notifyDataSetChanged()
+        onSelectionChanged?.invoke(selectedPackages.size)
     }
 
     fun setShowLabels(show: Boolean) {

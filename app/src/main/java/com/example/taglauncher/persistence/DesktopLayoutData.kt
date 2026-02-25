@@ -47,7 +47,10 @@ data class DesktopLayoutData(
      * Check if any AppDrawer components exist (for Tag FAB visibility).
      */
     fun hasAppDrawer(): Boolean {
-        return components.any { it.componentType == ComponentType.APP_DRAWER.typeName }
+        return components.any {
+            it.componentType == ComponentType.APP_DRAWER.typeName ||
+                it.componentType == ComponentType.APP_TO_TAG.typeName
+        }
     }
 
     /**

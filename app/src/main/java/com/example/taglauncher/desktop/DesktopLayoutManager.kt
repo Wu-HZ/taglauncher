@@ -2,7 +2,9 @@ package com.example.taglauncher.desktop
 
 import android.content.Context
 import com.example.taglauncher.PreferencesManager
+import com.example.taglauncher.component.BaseDesktopComponent
 import com.example.taglauncher.component.ComponentFactory
+import com.example.taglauncher.component.ComponentListener
 import com.example.taglauncher.component.ComponentType
 import com.example.taglauncher.component.DesktopComponent
 import com.example.taglauncher.persistence.ComponentData
@@ -30,6 +32,20 @@ class DesktopLayoutManager(
     }
 
     var layoutListener: LayoutListener? = null
+
+    private val componentListener = object : ComponentListener {
+        override fun onComponentBoundsChangeRequested(component: DesktopComponent, newBounds: ComponentBounds) {
+            updateComponentBounds(component.componentId, newBounds)
+        }
+
+        override fun onComponentSettingsChanged(component: DesktopComponent) {
+            updateComponentSettings(component.componentId)
+        }
+
+        override fun onComponentBringToFront(component: DesktopComponent) {
+            bringToFront(component.componentId)
+        }
+    }
 
     /**
      * Load the desktop layout from persistence.
@@ -83,6 +99,7 @@ class DesktopLayoutManager(
         val offsetX = getCurrentPageOffsetX(screenWidthDp)
         val adjustedBounds = componentBounds.copy(x = componentBounds.x + offsetX)
         val component = componentFactory.createNew(type, adjustedBounds)
+        attachComponentListener(component)
 
         canvasView.addComponent(component)
 
@@ -227,6 +244,7 @@ class DesktopLayoutManager(
      */
     fun addComponentFromData(data: ComponentData): DesktopComponent? {
         val component = componentFactory.createFromData(data) ?: return null
+        attachComponentListener(component)
         canvasView.addComponent(component)
 
         layoutData = layoutData.withComponent(data.withZIndex(layoutData.nextZIndex()))
@@ -389,7 +407,12 @@ class DesktopLayoutManager(
      */
     private fun createAndAddComponent(data: ComponentData) {
         val component = componentFactory.createFromData(data) ?: return
+        attachComponentListener(component)
         canvasView.addComponent(component)
+    }
+
+    private fun attachComponentListener(component: DesktopComponent) {
+        (component as? BaseDesktopComponent)?.componentListener = componentListener
     }
 
     /**

@@ -57,7 +57,8 @@ class ComponentFactory(
         settings: ComponentSettings
     ): DesktopComponent {
         return when (type) {
-            ComponentType.APP_DRAWER -> createAppDrawerComponent(componentId, bounds, settings)
+            ComponentType.APP_DRAWER -> createAppDrawerComponent(componentId, bounds, settings, ComponentType.APP_DRAWER, false)
+            ComponentType.APP_TO_TAG -> createAppDrawerComponent(componentId, bounds, settings, ComponentType.APP_TO_TAG, true)
             ComponentType.APP_GRID -> createAppGridComponent(componentId, bounds, settings)
             ComponentType.SEARCH_BAR -> createSearchBarComponent(componentId, bounds, settings)
         }
@@ -69,10 +70,12 @@ class ComponentFactory(
     private fun createAppDrawerComponent(
         componentId: String,
         bounds: ComponentBounds,
-        settings: ComponentSettings
+        settings: ComponentSettings,
+        componentType: ComponentType,
+        removeOnTagChange: Boolean
     ): DesktopComponent {
         val prefs = preferencesManager ?: PreferencesManager(context)
-        return AppDrawerComponent(context, componentId, bounds, settings, prefs)
+        return AppDrawerComponent(context, componentId, bounds, settings, prefs, componentType, removeOnTagChange)
     }
 
     /**
@@ -113,6 +116,14 @@ class ComponentFactory(
                 maxHeight = 64f
             )
             ComponentType.APP_DRAWER -> ComponentBounds(
+                x = 0f,
+                y = 64f,
+                width = screenWidthDp,
+                height = screenHeightDp - 100f,
+                minWidth = 150f,
+                minHeight = 150f
+            )
+            ComponentType.APP_TO_TAG -> ComponentBounds(
                 x = 0f,
                 y = 64f,
                 width = screenWidthDp,

@@ -254,7 +254,22 @@ class MainActivity : AppCompatActivity() {
                     clearSearchFilter()
                 }
                 component.onHideApp = { appInfo -> hideApp(appInfo) }
-                component.onManageTags = { appInfo -> showTagsDialog(appInfo) }
+                component.onManageTags = { appInfo ->
+                    showTagsDialog(appInfo) { changed ->
+                        if (changed) {
+                            component.handleTagsUpdated(appInfo)
+                        }
+                    }
+                }
+                component.onManageTagsBatch = { apps ->
+                    showBulkTagsDialog(
+                        apps = apps,
+                        onTagsUpdated = { changedApps ->
+                            component.handleTagsUpdated(changedApps)
+                        },
+                        onDone = { component.clearSelection() }
+                    )
+                }
                 component.refreshApps()
             }
             is AppGridComponent -> {
@@ -275,12 +290,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshComponents() {
         // Refresh all components with current data
-        layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+        getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.refreshApps()
         }
         layoutManager.getComponentsByType(ComponentType.APP_GRID).forEach { component ->
             (component as? AppGridComponent)?.refresh()
         }
+    }
+
+    private fun getAppDrawerComponents(): List<DesktopComponent> {
+        return layoutManager.getComponentsByType(ComponentType.APP_DRAWER) +
+            layoutManager.getComponentsByType(ComponentType.APP_TO_TAG)
     }
 
     private fun updateTagFabVisibility() {
@@ -377,7 +397,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySearchFilter(query: String) {
-        layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+        getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.applySearchFilter(query)
         }
     }
@@ -1347,6 +1367,19 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
+                // If multi-select is active, exit it
+                var clearedSelection = false
+                getAppDrawerComponents().forEach { component ->
+                    val drawer = component as? AppDrawerComponent
+                    if (drawer != null && drawer.hasSelection()) {
+                        drawer.clearSelection()
+                        clearedSelection = true
+                    }
+                }
+                if (clearedSelection) {
+                    return
+                }
+
                 // If in edit mode, exit it
                 if (layoutManager.isEditMode()) {
                     exitEditMode()
@@ -1510,7 +1543,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun filterAppDrawer(query: String) {
         // Find all AppDrawerComponents and apply the search filter
-        layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+        getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.applySearchFilter(query)
         }
     }
@@ -1581,11 +1614,11 @@ class MainActivity : AppCompatActivity() {
 
         if (currentTagFilter == null) {
             reloadVisibleApps()
-            layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+            getAppDrawerComponents().forEach { component ->
                 (component as? AppDrawerComponent)?.filterByTag(null)
             }
         } else {
-            layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+            getAppDrawerComponents().forEach { component ->
                 (component as? AppDrawerComponent)?.filterByTag(tag.id)
             }
         }
@@ -1594,7 +1627,7 @@ class MainActivity : AppCompatActivity() {
     private fun clearTagFilter() {
         currentTagFilter = null
         reloadVisibleApps()
-        layoutManager.getComponentsByType(ComponentType.APP_DRAWER).forEach { component ->
+        getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.filterByTag(null)
         }
     }
@@ -1606,9 +1639,10 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "${appInfo.label} hidden", Toast.LENGTH_SHORT).show()
     }
 
-    private fun showTagsDialog(appInfo: AppInfo) {
+    private fun showTagsDialog(appInfo: AppInfo, onTagsUpdated: ((Boolean) -> Unit)? = null) {
         val allTags = preferencesManager.getAllTags()
         val currentTagIds = preferencesManager.getTagsForApp(appInfo.packageName).toMutableList()
+        val originalTagIds = currentTagIds.toSet()
 
         if (allTags.isEmpty()) {
             showCreateTagDialog({ newTag ->
@@ -1618,7 +1652,8 @@ class MainActivity : AppCompatActivity() {
                     preferencesManager.setTagsForApp(appInfo.packageName, updatedTagIds)
                     Toast.makeText(this, "Tag '${newTag.label}' added to ${appInfo.label}", Toast.LENGTH_SHORT).show()
                     updateTagRingMenu()
-                    showTagsDialog(appInfo)
+                    onTagsUpdated?.invoke(true)
+                    showTagsDialog(appInfo, onTagsUpdated)
                 }
             })
             return
@@ -1683,17 +1718,29 @@ class MainActivity : AppCompatActivity() {
 
         var dialog: androidx.appcompat.app.AlertDialog? = null
 
+        fun persistTagsIfChanged(): Boolean {
+            val newSet = currentTagIds.toSet()
+            if (newSet != originalTagIds) {
+                preferencesManager.setTagsForApp(appInfo.packageName, currentTagIds)
+                Toast.makeText(this, "Tags updated", Toast.LENGTH_SHORT).show()
+                updateTagRingMenu()
+                onTagsUpdated?.invoke(true)
+                return true
+            }
+            return false
+        }
+
         allTags.forEachIndexed { index, tag ->
             val itemLayout = container.getChildAt(index + 1) as android.widget.LinearLayout
             itemLayout.setOnLongClickListener {
-                preferencesManager.setTagsForApp(appInfo.packageName, currentTagIds)
+                persistTagsIfChanged()
                 dialog?.dismiss()
                 showCreateTagDialog({ updatedTag ->
                     if (updatedTag != null) {
                         Toast.makeText(this, "Tag '${updatedTag.label}' updated", Toast.LENGTH_SHORT).show()
                         updateTagRingMenu()
                     }
-                    showTagsDialog(appInfo)
+                    showTagsDialog(appInfo, onTagsUpdated)
                 }, tag)
                 true
             }
@@ -1703,12 +1750,13 @@ class MainActivity : AppCompatActivity() {
             .setTitle("Tags for ${appInfo.label}")
             .setView(scrollView)
             .setPositiveButton("OK") { _, _ ->
-                preferencesManager.setTagsForApp(appInfo.packageName, currentTagIds)
-                Toast.makeText(this, "Tags updated", Toast.LENGTH_SHORT).show()
-                updateTagRingMenu()
+                val changed = persistTagsIfChanged()
+                if (!changed) {
+                    onTagsUpdated?.invoke(false)
+                }
             }
             .setNeutralButton("New Tag") { _, _ ->
-                preferencesManager.setTagsForApp(appInfo.packageName, currentTagIds)
+                persistTagsIfChanged()
                 showCreateTagDialog({ newTag ->
                     if (newTag != null) {
                         val updatedTagIds = preferencesManager.getTagsForApp(appInfo.packageName).toMutableList()
@@ -1716,12 +1764,142 @@ class MainActivity : AppCompatActivity() {
                         preferencesManager.setTagsForApp(appInfo.packageName, updatedTagIds)
                         Toast.makeText(this, "Tag '${newTag.label}' created and added", Toast.LENGTH_SHORT).show()
                         updateTagRingMenu()
+                        onTagsUpdated?.invoke(true)
                     }
-                    showTagsDialog(appInfo)
+                    showTagsDialog(appInfo, onTagsUpdated)
                 })
             }
             .setNegativeButton("Cancel", null)
             .create()
+
+        dialog.show()
+    }
+
+    private fun showBulkTagsDialog(
+        apps: List<AppInfo>,
+        onTagsUpdated: ((List<AppInfo>) -> Unit)? = null,
+        onDone: (() -> Unit)? = null
+    ) {
+        if (apps.isEmpty()) return
+        val allTags = preferencesManager.getAllTags()
+        if (allTags.isEmpty()) {
+            showCreateTagDialog({ newTag ->
+                if (newTag != null) {
+                    apps.forEach { app ->
+                        val updated = preferencesManager.getTagsForApp(app.packageName).toMutableList()
+                        if (!updated.contains(newTag.id)) {
+                            updated.add(newTag.id)
+                            preferencesManager.setTagsForApp(app.packageName, updated)
+                        }
+                    }
+                    updateTagRingMenu()
+                    onTagsUpdated?.invoke(apps)
+                }
+                onDone?.invoke()
+            })
+            return
+        }
+
+        val originalTags = apps.associateWith { app ->
+            preferencesManager.getTagsForApp(app.packageName).toSet()
+        }
+        var selectedTagIds = originalTags.values.reduce { acc, set -> acc.intersect(set) }.toMutableSet()
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(48, 24, 48, 8)
+        }
+
+        val hintText = android.widget.TextView(this).apply {
+            text = "Apply selected tags to ${apps.size} apps"
+            setTextColor(android.graphics.Color.GRAY)
+            textSize = 12f
+            setPadding(0, 0, 0, 16)
+        }
+        container.addView(hintText)
+
+        allTags.forEach { tag ->
+            val itemLayout = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 8, 0, 8)
+            }
+
+            val colorView = View(this).apply {
+                layoutParams = android.widget.LinearLayout.LayoutParams(40, 40).apply {
+                    setMargins(0, 0, 16, 0)
+                }
+                setBackgroundColor(tag.color)
+            }
+
+            val checkBox = android.widget.CheckBox(this).apply {
+                text = tag.label
+                isChecked = selectedTagIds.contains(tag.id)
+                layoutParams = android.widget.LinearLayout.LayoutParams(
+                    android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                    android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                setOnCheckedChangeListener { _, isChecked ->
+                    if (isChecked) {
+                        selectedTagIds.add(tag.id)
+                    } else {
+                        selectedTagIds.remove(tag.id)
+                    }
+                }
+            }
+
+            itemLayout.addView(colorView)
+            itemLayout.addView(checkBox)
+            container.addView(itemLayout)
+        }
+
+        val scrollView = android.widget.ScrollView(this).apply {
+            addView(container)
+        }
+
+        var dialog: androidx.appcompat.app.AlertDialog? = null
+
+        fun applyBulkTags() {
+            val changedApps = mutableListOf<AppInfo>()
+            val finalTags = selectedTagIds.toList()
+            apps.forEach { app ->
+                val before = originalTags[app] ?: emptySet()
+                if (before != selectedTagIds) {
+                    preferencesManager.setTagsForApp(app.packageName, finalTags)
+                    changedApps.add(app)
+                }
+            }
+            if (changedApps.isNotEmpty()) {
+                updateTagRingMenu()
+                onTagsUpdated?.invoke(changedApps)
+            }
+        }
+
+        dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Tags for ${apps.size} apps")
+            .setView(scrollView)
+            .setPositiveButton("OK") { _, _ ->
+                applyBulkTags()
+                onDone?.invoke()
+            }
+            .setNeutralButton("New Tag") { _, _ ->
+                applyBulkTags()
+                showCreateTagDialog({ newTag ->
+                    if (newTag != null) {
+                        selectedTagIds.add(newTag.id)
+                        applyBulkTags()
+                    }
+                    showBulkTagsDialog(apps, onTagsUpdated, onDone)
+                })
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                onDone?.invoke()
+            }
+            .create()
+
+        dialog.setOnCancelListener {
+            onDone?.invoke()
+        }
 
         dialog.show()
     }
