@@ -695,11 +695,16 @@ class DesktopCanvasView @JvmOverloads constructor(
         // Clamp to screen bounds
         val pageWidthDp = getPageWidthDp()
         val pageIndex = (original.x / pageWidthDp).toInt().coerceIn(0, pageCount - 1)
-        val minX = pageIndex * pageWidthDp
-        val maxX = minX + pageWidthDp - component.bounds.width
-        val maxY = (height / density) - component.bounds.height
+        val paddingLeftDp = paddingLeft / density
+        val paddingRightDp = paddingRight / density
+        val paddingTopDp = paddingTop / density
+        val paddingBottomDp = paddingBottom / density
+        val minX = pageIndex * pageWidthDp + paddingLeftDp
+        val maxX = minX + (pageWidthDp - paddingLeftDp - paddingRightDp) - component.bounds.width
+        val minY = paddingTopDp
+        val maxY = (height / density) - paddingBottomDp - component.bounds.height
         val clampedX = newX.coerceIn(minX, maxX.coerceAtLeast(minX))
-        val clampedY = newY.coerceIn(0f, maxY.coerceAtLeast(0f))
+        val clampedY = newY.coerceIn(minY, maxY.coerceAtLeast(minY))
 
         component.bounds = component.bounds.copy(x = clampedX, y = clampedY)
         requestLayout()
@@ -755,17 +760,37 @@ class DesktopCanvasView @JvmOverloads constructor(
             }
         }
 
+        val paddingLeftDp = paddingLeft / density
+        val paddingRightDp = paddingRight / density
+        val paddingTopDp = paddingTop / density
+        val paddingBottomDp = paddingBottom / density
+        val pageWidthDp = getPageWidthDp()
+        val pageIndex = (original.x / pageWidthDp).toInt().coerceIn(0, pageCount - 1)
+        val visibleLeft = pageIndex * pageWidthDp + paddingLeftDp
+        val visibleRight = pageIndex * pageWidthDp + pageWidthDp - paddingRightDp
+        val visibleTop = paddingTopDp
+        val visibleBottom = (height / density) - paddingBottomDp
+
+        // Clamp position to visible bounds
+        newX = newX.coerceIn(visibleLeft, (visibleRight - original.minWidth).coerceAtLeast(visibleLeft))
+        newY = newY.coerceIn(visibleTop, (visibleBottom - original.minHeight).coerceAtLeast(visibleTop))
+
+        var maxWidthAllowed = (visibleRight - newX).coerceAtLeast(0f)
+        var maxHeightAllowed = (visibleBottom - newY).coerceAtLeast(0f)
+
         // Apply max constraints
         if (original.maxWidth < Float.MAX_VALUE) {
-            newWidth = newWidth.coerceAtMost(original.maxWidth)
+            maxWidthAllowed = maxWidthAllowed.coerceAtMost(original.maxWidth)
         }
         if (original.maxHeight < Float.MAX_VALUE) {
-            newHeight = newHeight.coerceAtMost(original.maxHeight)
+            maxHeightAllowed = maxHeightAllowed.coerceAtMost(original.maxHeight)
         }
 
-        // Clamp position to screen
-        newX = newX.coerceAtLeast(0f)
-        newY = newY.coerceAtLeast(0f)
+        val minWidthAllowed = original.minWidth.coerceAtMost(maxWidthAllowed)
+        val minHeightAllowed = original.minHeight.coerceAtMost(maxHeightAllowed)
+
+        newWidth = newWidth.coerceIn(minWidthAllowed, maxWidthAllowed)
+        newHeight = newHeight.coerceIn(minHeightAllowed, maxHeightAllowed)
 
         component.bounds = component.bounds.copy(
             x = newX,
