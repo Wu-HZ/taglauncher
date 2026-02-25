@@ -401,19 +401,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showEditMenu() {
-        val options = arrayOf("Edit Desktop", "Add Page", "Manage Pages", "Settings")
+        val options = arrayOf("Edit Desktop", "Manage Pages", "Settings")
 
         MaterialAlertDialogBuilder(this)
             .setTitle("Edit Menu")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> enterEditMode()
-                    1 -> {
-                        val newCount = layoutManager.addPage()
-                        Toast.makeText(this, "Page $newCount added", Toast.LENGTH_SHORT).show()
-                    }
-                    2 -> showManagePagesDialog()
-                    3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                    1 -> showManagePagesDialog()
+                    2 -> startActivity(Intent(this, SettingsActivity::class.java))
                 }
             }
             .setNegativeButton("Cancel", null)
