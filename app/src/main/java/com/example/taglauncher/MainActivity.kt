@@ -19,7 +19,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -82,8 +81,6 @@ class MainActivity : AppCompatActivity() {
     // Manage pages overlay
     private lateinit var managePagesOverlay: FrameLayout
     private lateinit var managePagesRecycler: RecyclerView
-    private lateinit var managePagesAddButton: MaterialButton
-    private lateinit var managePagesCloseButton: ImageButton
     private var managePagesAdapter: PageManagerAdapter? = null
     private val pagePreviewCache = mutableMapOf<Int, Bitmap>()
     private var pagePreviewSize: Pair<Int, Int>? = null
@@ -179,9 +176,6 @@ class MainActivity : AppCompatActivity() {
         // Manage pages overlay
         managePagesOverlay = findViewById(R.id.managePagesOverlay)
         managePagesRecycler = findViewById(R.id.managePagesRecycler)
-        managePagesAddButton = findViewById(R.id.managePagesAddButton)
-        managePagesCloseButton = findViewById(R.id.managePagesCloseButton)
-
         setupManagePagesOverlay()
     }
 
@@ -445,11 +439,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupManagePagesOverlay() {
         managePagesOverlay.setOnClickListener { }
-        managePagesCloseButton.setOnClickListener { hideManagePagesOverlay() }
-        managePagesAddButton.setOnClickListener {
-            layoutManager.addPage()
-            managePagesAdapter?.let { refreshManagePages(it) }
-        }
     }
 
     private fun showManagePagesOverlay() {
@@ -492,6 +481,10 @@ class MainActivity : AppCompatActivity() {
             onDeletePage = { index ->
                 managePagesAdapter?.let { confirmDeletePage(index, it) }
             },
+            onAddPage = {
+                layoutManager.addPage()
+                managePagesAdapter?.let { refreshManagePages(it) }
+            },
             previewProvider = { pageIndex, width, height ->
                 getPagePreview(pageIndex, width, height)
             }
@@ -508,6 +501,16 @@ class MainActivity : AppCompatActivity() {
             private var dragFrom = RecyclerView.NO_POSITION
             private var dragTo = RecyclerView.NO_POSITION
 
+            override fun getMovementFlags(
+                recyclerView: RecyclerView,
+                viewHolder: RecyclerView.ViewHolder
+            ): Int {
+                if (viewHolder.bindingAdapterPosition >= adapter.realPageCount()) {
+                    return 0
+                }
+                return super.getMovementFlags(recyclerView, viewHolder)
+            }
+
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
@@ -516,6 +519,9 @@ class MainActivity : AppCompatActivity() {
                 val from = viewHolder.bindingAdapterPosition
                 val to = target.bindingAdapterPosition
                 if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) {
+                    return false
+                }
+                if (from >= adapter.realPageCount() || to >= adapter.realPageCount()) {
                     return false
                 }
                 adapter.onItemMove(from, to)
@@ -1965,6 +1971,16 @@ class MainActivity : AppCompatActivity() {
             val toolbarParams = editModeToolbar.layoutParams as android.widget.FrameLayout.LayoutParams
             toolbarParams.topMargin = insets.top
             editModeToolbar.layoutParams = toolbarParams
+
+            val manageParams = managePagesOverlay.layoutParams as? android.widget.FrameLayout.LayoutParams
+            manageParams?.let {
+                managePagesOverlay.setPadding(
+                    managePagesOverlay.paddingLeft,
+                    insets.top,
+                    managePagesOverlay.paddingRight,
+                    managePagesOverlay.paddingBottom
+                )
+            }
 
             // Let the desktop canvas handle its own insets if needed
             desktopCanvas.setPadding(

@@ -19,6 +19,7 @@ class PageManagerAdapter(
     private val onSelectPage: (Int) -> Unit,
     private val onSetHome: (Int) -> Unit,
     private val onDeletePage: (Int) -> Unit,
+    private val onAddPage: () -> Unit,
     private val previewProvider: (Int, Int, Int) -> android.graphics.Bitmap?
 ) : RecyclerView.Adapter<PageManagerAdapter.PageViewHolder>() {
 
@@ -30,6 +31,7 @@ class PageManagerAdapter(
         val label: TextView = itemView.findViewById(R.id.pageLabel)
         val homeButton: ImageButton = itemView.findViewById(R.id.pageHomeButton)
         val deleteButton: ImageButton = itemView.findViewById(R.id.pageDeleteButton)
+        val overlayBar: View = itemView.findViewById(R.id.pageOverlayBar)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): PageViewHolder {
@@ -39,13 +41,22 @@ class PageManagerAdapter(
     }
 
     override fun onBindViewHolder(holder: PageViewHolder, position: Int) {
+        if (position == layoutData.pageCount) {
+            bindAddCard(holder)
+            return
+        }
         val pageIndex = pageOrder.getOrNull(position) ?: position
         val isHome = pageIndex == layoutData.homePage
         val isCurrent = pageIndex == currentPage
         val ratio = if (pageWidthDp > 0f) pageHeightDp / pageWidthDp else 1f
 
-        holder.label.text = "Page ${position + 1}"
+        holder.label.text = ""
+        holder.label.visibility = View.INVISIBLE
+        holder.overlayBar.visibility = View.VISIBLE
         holder.thumbnail.tag = pageIndex
+        holder.thumbnail.setImageDrawable(null)
+        holder.thumbnail.scaleType = ImageView.ScaleType.FIT_CENTER
+        holder.thumbnail.setBackgroundColor(Color.TRANSPARENT)
         val width = holder.thumbnail.width
         if (width > 0) {
             renderPreview(holder, pageIndex, width, ratio)
@@ -69,12 +80,14 @@ class PageManagerAdapter(
             if (isHome) Color.parseColor("#FFD54F") else Color.parseColor("#80FFFFFF")
         )
 
+        holder.homeButton.visibility = View.VISIBLE
+        holder.deleteButton.visibility = View.VISIBLE
         holder.homeButton.setOnClickListener { onSetHome(pageIndex) }
         holder.deleteButton.setOnClickListener { onDeletePage(pageIndex) }
         holder.card.setOnClickListener { onSelectPage(pageIndex) }
     }
 
-    override fun getItemCount(): Int = layoutData.pageCount
+    override fun getItemCount(): Int = layoutData.pageCount + 1
 
     fun updateSnapshot(
         newLayoutData: DesktopLayoutData,
@@ -101,6 +114,8 @@ class PageManagerAdapter(
         pageOrder.add(toPosition, item)
         notifyItemMoved(fromPosition, toPosition)
     }
+
+    fun realPageCount(): Int = layoutData.pageCount
 
     private fun dpToPx(view: View, dp: Int): Int {
         return (dp * view.resources.displayMetrics.density).toInt()
@@ -132,6 +147,53 @@ class PageManagerAdapter(
     private fun resetPageOrder() {
         pageOrder.clear()
         pageOrder.addAll(layoutData.pageCount.let { count -> (0 until count) })
+    }
+
+    private fun bindAddCard(holder: PageViewHolder) {
+        holder.card.strokeWidth = 0
+        holder.card.strokeColor = Color.TRANSPARENT
+        holder.label.text = ""
+        holder.label.visibility = View.GONE
+        holder.overlayBar.visibility = View.GONE
+        holder.thumbnail.tag = "add"
+        holder.thumbnail.setImageResource(android.R.drawable.ic_input_add)
+        holder.thumbnail.scaleType = ImageView.ScaleType.CENTER
+        holder.thumbnail.setBackgroundColor(Color.parseColor("#22000000"))
+        holder.homeButton.visibility = View.GONE
+        holder.deleteButton.visibility = View.GONE
+        holder.card.setOnClickListener { onAddPage() }
+
+        val ratio = if (pageWidthDp > 0f) pageHeightDp / pageWidthDp else 1f
+        val width = holder.thumbnail.width
+        if (width > 0) {
+            val desiredHeight = (width * ratio).toInt().coerceAtLeast(1)
+            val imageParams = holder.thumbnail.layoutParams
+            if (imageParams.height != desiredHeight) {
+                imageParams.height = desiredHeight
+                holder.thumbnail.layoutParams = imageParams
+            }
+            val cardParams = holder.card.layoutParams
+            if (cardParams.height != desiredHeight) {
+                cardParams.height = desiredHeight
+                holder.card.layoutParams = cardParams
+            }
+        } else {
+            holder.thumbnail.post {
+                val measuredWidth = holder.thumbnail.width
+                if (measuredWidth <= 0) return@post
+                val desiredHeight = (measuredWidth * ratio).toInt().coerceAtLeast(1)
+                val imageParams = holder.thumbnail.layoutParams
+                if (imageParams.height != desiredHeight) {
+                    imageParams.height = desiredHeight
+                    holder.thumbnail.layoutParams = imageParams
+                }
+                val cardParams = holder.card.layoutParams
+                if (cardParams.height != desiredHeight) {
+                    cardParams.height = desiredHeight
+                    holder.card.layoutParams = cardParams
+                }
+            }
+        }
     }
 
     init {

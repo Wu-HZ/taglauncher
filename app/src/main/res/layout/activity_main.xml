@@ -306,16 +306,6 @@
                     android:textSize="20sp"
                     android:textStyle="bold" />
 
-                <ImageButton
-                    android:id="@+id/managePagesCloseButton"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Close"
-                    android:scaleType="center"
-                    android:src="@android:drawable/ic_menu_close_clear_cancel"
-                    app:tint="@android:color/white" />
-
             </LinearLayout>
 
             <androidx.recyclerview.widget.RecyclerView
@@ -326,13 +316,6 @@
                 android:overScrollMode="never"
                 android:clipToPadding="false"
                 android:paddingBottom="8dp" />
-
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/managePagesAddButton"
-                style="@style/Widget.Material3.Button"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Add Page" />
 
         </LinearLayout>
 
