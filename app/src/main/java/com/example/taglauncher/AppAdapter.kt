@@ -2,6 +2,7 @@ package com.example.taglauncher
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Outline
 import android.net.Uri
@@ -23,6 +24,7 @@ import android.widget.TextView
 import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import java.util.Locale
 
 class AppAdapter(
     private val context: Context,
@@ -175,6 +177,8 @@ class AppAdapter(
         val density = context.resources.displayMetrics.density
         fun dpToPx(dp: Int): Int = (dp * density).toInt()
 
+        val englishLabel = getLocalizedLabel(appInfo.packageName, Locale.ENGLISH) ?: appInfo.label
+        val chineseLabel = getLocalizedLabel(appInfo.packageName, Locale.SIMPLIFIED_CHINESE) ?: appInfo.label
         val initialDescription = getDescription?.invoke(appInfo)?.trim().orEmpty()
 
         val actionsContainer = LinearLayout(context).apply {
@@ -252,9 +256,39 @@ class AppAdapter(
             setPadding(dpToPx(12), dpToPx(16), dpToPx(12), dpToPx(4))
         }
 
+        val nameRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8))
+        }
+
+        val englishText = TextView(context).apply {
+            text = englishLabel
+            textSize = 16f
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        }
+
+        val chineseText = TextView(context).apply {
+            text = chineseLabel
+            textSize = 16f
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        }
+
+        nameRow.addView(englishText)
+        nameRow.addView(chineseText)
+
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(8))
+            addView(nameRow)
             addView(actionsContainer)
             addView(descriptionLabel)
             addView(descriptionInput)
@@ -265,7 +299,6 @@ class AppAdapter(
         }
 
         dialog = MaterialAlertDialogBuilder(context)
-            .setTitle(appInfo.label)
             .setView(scrollView)
             .setPositiveButton(android.R.string.ok) { _, _ -> }
             .setNegativeButton(android.R.string.cancel) { _, _ -> shouldSave = false }
@@ -278,6 +311,24 @@ class AppAdapter(
         }
 
         dialog.show()
+    }
+
+    private fun getLocalizedLabel(packageName: String, locale: Locale): String? {
+        return try {
+            val pm = context.packageManager
+            val appInfo = pm.getApplicationInfo(packageName, 0)
+            val baseContext = context.createPackageContext(packageName, 0)
+            val config = Configuration(baseContext.resources.configuration)
+            config.setLocale(locale)
+            val localizedContext = baseContext.createConfigurationContext(config)
+            when {
+                appInfo.labelRes != 0 -> localizedContext.resources.getString(appInfo.labelRes)
+                appInfo.nonLocalizedLabel != null -> appInfo.nonLocalizedLabel.toString()
+                else -> pm.getApplicationLabel(appInfo).toString()
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun openAppInfo(packageName: String) {
