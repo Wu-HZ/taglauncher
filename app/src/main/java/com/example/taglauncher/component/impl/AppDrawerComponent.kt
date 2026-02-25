@@ -91,6 +91,21 @@ class AppDrawerComponent(
         applyVisualSettings()
     }
 
+    override fun onEnterEditMode() {
+        super.onEnterEditMode()
+        if (::appAdapter.isInitialized) {
+            appAdapter.setLongPressEnabled(false)
+            appAdapter.clearSelection()
+        }
+    }
+
+    override fun onExitEditMode() {
+        super.onExitEditMode()
+        if (::appAdapter.isInitialized) {
+            appAdapter.setLongPressEnabled(true)
+        }
+    }
+
     private fun setupRecyclerView() {
         val columns = getSetting("columns", 4)
         recyclerView.layoutManager = GridLayoutManager(context, columns)

@@ -50,6 +50,7 @@ class AppAdapter(
     private val density = context.resources.displayMetrics.density
     private val selectedPackages = mutableSetOf<String>()
     private var selectionMode = false
+    private var longPressEnabled = true
 
     var onSelectionChanged: ((Int) -> Unit)? = null
 
@@ -118,6 +119,9 @@ class AppAdapter(
         }
 
         holder.itemView.setOnLongClickListener {
+            if (!longPressEnabled) {
+                return@setOnLongClickListener false
+            }
             if (selectionMode) {
                 toggleSelection(appInfo)
             } else {
@@ -319,6 +323,10 @@ class AppAdapter(
         selectionMode = false
         notifyDataSetChanged()
         onSelectionChanged?.invoke(0)
+    }
+
+    fun setLongPressEnabled(enabled: Boolean) {
+        longPressEnabled = enabled
     }
 
     fun selectAllVisible() {
