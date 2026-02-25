@@ -109,6 +109,7 @@ class AppDrawerComponent(
         val gridPaddingPx = dpToPx(gridPaddingDp.toFloat())
         recyclerView.setPadding(gridPaddingPx, gridPaddingPx, gridPaddingPx, gridPaddingPx)
 
+        val iconFrameSize = getSetting("iconFrameSize", getSetting("iconSize", 48))
         appAdapter = AppAdapter(
             context = context,
             appList = visibleApps,
@@ -128,10 +129,15 @@ class AppDrawerComponent(
                 preferencesManager.setAppDescription(appInfo.packageName, description)
             },
             showLabels = getSetting("showLabels", true),
+            iconFrameSizeDp = iconFrameSize,
             iconSizeDp = getSetting("iconSize", 48)
         )
         appAdapter.onSelectionChanged = { count ->
             updateSelectionBar(count)
+        }
+
+        if (!settings.has("iconFrameSize")) {
+            setSetting("iconFrameSize", iconFrameSize)
         }
 
         // Apply additional style settings
@@ -411,12 +417,21 @@ class AppDrawerComponent(
 
             // Icons
             SettingDefinition.IntRange(
+                key = "iconFrameSize",
+                label = "Icon Frame Size",
+                description = "Size of the icon frame (dp)",
+                default = 48,
+                min = 32,
+                max = 96,
+                step = 4
+            ),
+            SettingDefinition.IntRange(
                 key = "iconSize",
                 label = "Icon Size",
                 description = "Size of app icons (dp)",
                 default = 48,
-                min = 32,
-                max = 80,
+                min = 16,
+                max = 96,
                 step = 4
             ),
             SettingDefinition.Choice(
@@ -533,6 +548,13 @@ class AppDrawerComponent(
                 }
                 applyMaxRowsLimit()
             }
+            "iconFrameSize" -> {
+                val frameSize = (value as? Int) ?: 48
+                if (::appAdapter.isInitialized) {
+                    appAdapter.setIconFrameSize(frameSize)
+                }
+                applyMaxRowsLimit()
+            }
             "iconShape" -> {
                 val shape = (value as? String) ?: "default"
                 if (::appAdapter.isInitialized) {
@@ -619,7 +641,7 @@ class AppDrawerComponent(
             }
 
             // Calculate row height based on current settings
-            val iconSizeDp = getSetting("iconSize", 48)
+            val iconFrameSizeDp = getSetting("iconFrameSize", getSetting("iconSize", 48))
             val showLabels = getSetting("showLabels", true)
             val labelSizeSp = getSetting("labelSize", 12)
             val labelMaxLines = getSetting("labelMaxLines", 1)
@@ -628,7 +650,7 @@ class AppDrawerComponent(
             val gridPaddingDp = getSetting("gridPadding", 0)
 
             // Estimate row height
-            val iconSizePx = dpToPx(iconSizeDp.toFloat())
+            val iconSizePx = dpToPx(iconFrameSizeDp.toFloat())
             val verticalSpacingPx = dpToPx(verticalSpacingDp.toFloat())
             val itemPaddingPx = dpToPx(2f) * 2 // top and bottom padding from item_app.xml
 

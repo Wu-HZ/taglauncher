@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -19,6 +20,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
@@ -31,6 +33,7 @@ class AppAdapter(
     private val getDescription: ((AppInfo) -> String?)? = null,
     private val setDescription: ((AppInfo, String) -> Unit)? = null,
     private var showLabels: Boolean = true,
+    private var iconFrameSizeDp: Int = 48,
     private var iconSizeDp: Int = 48
 ) : RecyclerView.Adapter<AppAdapter.AppViewHolder>(), Filterable {
 
@@ -51,6 +54,7 @@ class AppAdapter(
     var onSelectionChanged: ((Int) -> Unit)? = null
 
     class AppViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
+        val appIconFrame: FrameLayout = itemView.findViewById(R.id.appIconFrame)
         val appIcon: ImageView = itemView.findViewById(R.id.appIcon)
         val appLabel: TextView = itemView.findViewById(R.id.appLabel)
         val selectionOverlay: View = itemView.findViewById(R.id.appSelectionOverlay)
@@ -68,17 +72,21 @@ class AppAdapter(
         val isSelected = selectedPackages.contains(appInfo.packageName)
         holder.appIcon.setImageDrawable(appInfo.icon)
 
+        // Apply icon frame size
+        val iconFrameSizePx = (iconFrameSizeDp * density).toInt()
+        holder.appIconFrame.layoutParams.width = iconFrameSizePx
+        holder.appIconFrame.layoutParams.height = iconFrameSizePx
+
         // Apply icon size
         val iconSizePx = (iconSizeDp * density).toInt()
-        holder.appIcon.layoutParams.width = iconSizePx
-        holder.appIcon.layoutParams.height = iconSizePx
+        holder.appIcon.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
 
         // Apply icon padding
         val iconPaddingPx = (iconPaddingDp * density).toInt()
         holder.appIcon.setPadding(iconPaddingPx, iconPaddingPx, iconPaddingPx, iconPaddingPx)
 
         // Apply icon shape clipping
-        applyIconShape(holder.appIcon, iconSizePx)
+        applyIconShape(holder.appIconFrame, iconFrameSizePx)
 
         // Apply label styling
         if (showLabels) {
@@ -122,37 +130,37 @@ class AppAdapter(
     /**
      * Apply icon shape clipping using ViewOutlineProvider.
      */
-    private fun applyIconShape(imageView: ImageView, sizePx: Int) {
+    private fun applyIconShape(targetView: View, sizePx: Int) {
         when (iconShape) {
             "circle" -> {
-                imageView.outlineProvider = object : ViewOutlineProvider() {
+                targetView.outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
                         outline.setOval(0, 0, sizePx, sizePx)
                     }
                 }
-                imageView.clipToOutline = true
+                targetView.clipToOutline = true
             }
             "rounded" -> {
-                imageView.outlineProvider = object : ViewOutlineProvider() {
+                targetView.outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
                         val cornerRadius = sizePx * 0.2f // 20% corner radius
                         outline.setRoundRect(0, 0, sizePx, sizePx, cornerRadius)
                     }
                 }
-                imageView.clipToOutline = true
+                targetView.clipToOutline = true
             }
             "square" -> {
-                imageView.outlineProvider = object : ViewOutlineProvider() {
+                targetView.outlineProvider = object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
                         outline.setRect(0, 0, sizePx, sizePx)
                     }
                 }
-                imageView.clipToOutline = true
+                targetView.clipToOutline = true
             }
             else -> {
                 // Default: no clipping
-                imageView.outlineProvider = ViewOutlineProvider.BACKGROUND
-                imageView.clipToOutline = false
+                targetView.outlineProvider = ViewOutlineProvider.BACKGROUND
+                targetView.clipToOutline = false
             }
         }
     }
@@ -352,6 +360,11 @@ class AppAdapter(
 
     fun setIconSize(sizeDp: Int) {
         iconSizeDp = sizeDp
+        notifyDataSetChanged()
+    }
+
+    fun setIconFrameSize(sizeDp: Int) {
+        iconFrameSizeDp = sizeDp
         notifyDataSetChanged()
     }
 
