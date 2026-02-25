@@ -10,6 +10,9 @@ for fast app filtering.
 - Editable desktop layout with drag and resize
 - Import/export of tags (JSON)
 
+## Screenshots
+Coming soon.
+
 ## Requirements
 - Android Studio (Kotlin)
 - JDK 11+
@@ -28,6 +31,12 @@ for fast app filtering.
 ## Notes
 - This is a launcher app; set it as the default Home app to use it.
 - Uses QUERY_ALL_PACKAGES to list installed apps.
+
+## Contributing
+See CONTRIBUTING.md.
+
+## Code of Conduct
+See CODE_OF_CONDUCT.md.
 
 ## License
 MIT
