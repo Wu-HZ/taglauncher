@@ -22,6 +22,8 @@ class PageManagerAdapter(
     private val previewProvider: (Int, Int, Int) -> android.graphics.Bitmap?
 ) : RecyclerView.Adapter<PageManagerAdapter.PageViewHolder>() {
 
+    private val pageOrder = mutableListOf<Int>()
+
     class PageViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val card: MaterialCardView = itemView.findViewById(R.id.pageCard)
         val thumbnail: ImageView = itemView.findViewById(R.id.pageThumbnail)
@@ -37,33 +39,22 @@ class PageManagerAdapter(
     }
 
     override fun onBindViewHolder(holder: PageViewHolder, position: Int) {
-        val pageIndex = position
+        val pageIndex = pageOrder.getOrNull(position) ?: position
         val isHome = pageIndex == layoutData.homePage
         val isCurrent = pageIndex == currentPage
         val ratio = if (pageWidthDp > 0f) pageHeightDp / pageWidthDp else 1f
 
-        holder.label.text = "Page ${pageIndex + 1}"
-        holder.thumbnail.setImageBitmap(null)
+        holder.label.text = "Page ${position + 1}"
         holder.thumbnail.tag = pageIndex
-        holder.thumbnail.post {
-            val width = holder.thumbnail.width
-            if (holder.thumbnail.tag != pageIndex || width <= 0) {
-                return@post
-            }
-            val desiredHeight = (width * ratio).toInt().coerceAtLeast(1)
-            val imageParams = holder.thumbnail.layoutParams
-            if (imageParams.height != desiredHeight) {
-                imageParams.height = desiredHeight
-                holder.thumbnail.layoutParams = imageParams
-            }
-            val cardParams = holder.card.layoutParams
-            if (cardParams.height != desiredHeight) {
-                cardParams.height = desiredHeight
-                holder.card.layoutParams = cardParams
-            }
-            val bitmap = previewProvider(pageIndex, width, desiredHeight)
-            if (holder.thumbnail.tag == pageIndex) {
-                holder.thumbnail.setImageBitmap(bitmap)
+        val width = holder.thumbnail.width
+        if (width > 0) {
+            renderPreview(holder, pageIndex, width, ratio)
+        } else {
+            holder.thumbnail.post {
+                if (holder.thumbnail.tag != pageIndex) return@post
+                val measuredWidth = holder.thumbnail.width
+                if (measuredWidth <= 0) return@post
+                renderPreview(holder, pageIndex, measuredWidth, ratio)
             }
         }
 
@@ -95,10 +86,55 @@ class PageManagerAdapter(
         this.pageWidthDp = pageWidthDp
         this.pageHeightDp = pageHeightDp
         this.currentPage = currentPage
+        resetPageOrder()
         notifyDataSetChanged()
+    }
+
+    fun onItemMove(fromPosition: Int, toPosition: Int) {
+        if (fromPosition == toPosition ||
+            fromPosition !in pageOrder.indices ||
+            toPosition !in pageOrder.indices
+        ) {
+            return
+        }
+        val item = pageOrder.removeAt(fromPosition)
+        pageOrder.add(toPosition, item)
+        notifyItemMoved(fromPosition, toPosition)
     }
 
     private fun dpToPx(view: View, dp: Int): Int {
         return (dp * view.resources.displayMetrics.density).toInt()
+    }
+
+    private fun renderPreview(
+        holder: PageViewHolder,
+        pageIndex: Int,
+        width: Int,
+        ratio: Float
+    ) {
+        val desiredHeight = (width * ratio).toInt().coerceAtLeast(1)
+        val imageParams = holder.thumbnail.layoutParams
+        if (imageParams.height != desiredHeight) {
+            imageParams.height = desiredHeight
+            holder.thumbnail.layoutParams = imageParams
+        }
+        val cardParams = holder.card.layoutParams
+        if (cardParams.height != desiredHeight) {
+            cardParams.height = desiredHeight
+            holder.card.layoutParams = cardParams
+        }
+        val bitmap = previewProvider(pageIndex, width, desiredHeight)
+        if (bitmap != null && holder.thumbnail.tag == pageIndex) {
+            holder.thumbnail.setImageBitmap(bitmap)
+        }
+    }
+
+    private fun resetPageOrder() {
+        pageOrder.clear()
+        pageOrder.addAll(layoutData.pageCount.let { count -> (0 until count) })
+    }
+
+    init {
+        resetPageOrder()
     }
 }

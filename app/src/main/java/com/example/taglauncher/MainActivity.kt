@@ -487,7 +487,7 @@ class MainActivity : AppCompatActivity() {
             },
             onSetHome = { index ->
                 layoutManager.setHomePage(index)
-                managePagesAdapter?.let { refreshManagePages(it) }
+                managePagesAdapter?.let { refreshManagePages(it, clearCache = false) }
             },
             onDeletePage = { index ->
                 managePagesAdapter?.let { confirmDeletePage(index, it) }
@@ -505,6 +505,9 @@ class MainActivity : AppCompatActivity() {
             ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT,
             0
         ) {
+            private var dragFrom = RecyclerView.NO_POSITION
+            private var dragTo = RecyclerView.NO_POSITION
+
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
@@ -515,11 +518,34 @@ class MainActivity : AppCompatActivity() {
                 if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) {
                     return false
                 }
-                val moved = layoutManager.movePage(from, to)
-                if (moved) {
-                    refreshManagePages(adapter)
+                adapter.onItemMove(from, to)
+                if (dragFrom == RecyclerView.NO_POSITION) {
+                    dragFrom = from
                 }
-                return moved
+                dragTo = to
+                return true
+            }
+
+            override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(viewHolder, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
+                    dragFrom = viewHolder?.bindingAdapterPosition ?: RecyclerView.NO_POSITION
+                    dragTo = dragFrom
+                }
+            }
+
+            override fun clearView(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder) {
+                super.clearView(recyclerView, viewHolder)
+                if (dragFrom != RecyclerView.NO_POSITION &&
+                    dragTo != RecyclerView.NO_POSITION &&
+                    dragFrom != dragTo
+                ) {
+                    layoutManager.movePage(dragFrom, dragTo)
+                    reorderPagePreviewCache(dragFrom, dragTo)
+                    refreshManagePages(adapter, clearCache = false)
+                }
+                dragFrom = RecyclerView.NO_POSITION
+                dragTo = RecyclerView.NO_POSITION
             }
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) = Unit
@@ -542,6 +568,26 @@ class MainActivity : AppCompatActivity() {
         return bitmap
     }
 
+    private fun reorderPagePreviewCache(fromIndex: Int, toIndex: Int) {
+        if (pagePreviewCache.isEmpty() || fromIndex == toIndex) return
+        val count = layoutManager.getPageCount()
+        if (fromIndex !in 0 until count || toIndex !in 0 until count) return
+
+        val updated = mutableMapOf<Int, Bitmap>()
+        pagePreviewCache.forEach { (oldIndex, bitmap) ->
+            val newIndex = when {
+                fromIndex < toIndex && oldIndex == fromIndex -> toIndex
+                fromIndex < toIndex && oldIndex in (fromIndex + 1)..toIndex -> oldIndex - 1
+                fromIndex > toIndex && oldIndex == fromIndex -> toIndex
+                fromIndex > toIndex && oldIndex in toIndex until fromIndex -> oldIndex + 1
+                else -> oldIndex
+            }
+            updated[newIndex] = bitmap
+        }
+        pagePreviewCache.clear()
+        pagePreviewCache.putAll(updated)
+    }
+
     private fun confirmDeletePage(pageIndex: Int, adapter: PageManagerAdapter) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Delete Page")
@@ -558,7 +604,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun refreshManagePages(adapter: PageManagerAdapter) {
+    private fun refreshManagePages(adapter: PageManagerAdapter, clearCache: Boolean = true) {
         val layoutData = layoutManager.getLayoutSnapshot()
         val pageWidthDp = desktopCanvas.getPageWidthDp()
         val pageHeightDp = if (desktopCanvas.height > 0) {
@@ -566,8 +612,10 @@ class MainActivity : AppCompatActivity() {
         } else {
             resources.displayMetrics.heightPixels / resources.displayMetrics.density
         }
-        pagePreviewCache.clear()
-        pagePreviewSize = null
+        if (clearCache) {
+            pagePreviewCache.clear()
+            pagePreviewSize = null
+        }
         adapter.updateSnapshot(
             newLayoutData = layoutData,
             pageWidthDp = pageWidthDp,
