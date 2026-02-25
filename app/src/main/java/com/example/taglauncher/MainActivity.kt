@@ -12,6 +12,7 @@ import android.text.TextWatcher
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -1253,6 +1254,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupGestureDetector() {
+        val minSwipeDistance = dpToPx(140).toFloat()
+        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 2
         gestureDetector = GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onFling(
                 e1: MotionEvent?,
@@ -1260,11 +1263,29 @@ class MainActivity : AppCompatActivity() {
                 velocityX: Float,
                 velocityY: Float
             ): Boolean {
-                if (e1 != null && e2.y - e1.y > 100 && kotlin.math.abs(velocityY) > 100) {
-                    handleSwipeDown()
-                    return true
+                if (e1 != null) {
+                    val deltaX = e2.x - e1.x
+                    val deltaY = e2.y - e1.y
+                    val isVerticalDominant = kotlin.math.abs(deltaY) > kotlin.math.abs(deltaX) * 1.5f
+                    val isFastEnough =
+                        kotlin.math.abs(velocityY) > minVelocity &&
+                            kotlin.math.abs(velocityY) > kotlin.math.abs(velocityX) * 1.2f
+                    if (deltaY > minSwipeDistance && isVerticalDominant && isFastEnough) {
+                        handleSwipeDown()
+                        return true
+                    }
                 }
                 return false
+            }
+
+            override fun onScroll(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                distanceX: Float,
+                distanceY: Float
+            ): Boolean {
+                // Avoid triggering fling-based swipe down when user is clearly paging horizontally.
+                return kotlin.math.abs(distanceX) > kotlin.math.abs(distanceY) * 1.2f
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
