@@ -111,6 +111,10 @@ class AppDrawerComponent(
                 appAdapter.updateList(visibleApps)
             },
             onManageTags = { appInfo -> onManageTags?.invoke(appInfo) },
+            getDescription = { appInfo -> preferencesManager.getAppDescription(appInfo.packageName) },
+            setDescription = { appInfo, description ->
+                preferencesManager.setAppDescription(appInfo.packageName, description)
+            },
             showLabels = getSetting("showLabels", true),
             iconSizeDp = getSetting("iconSize", 48)
         )

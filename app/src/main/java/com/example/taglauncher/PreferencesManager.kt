@@ -32,6 +32,9 @@ class PreferencesManager(context: Context) {
         // Hidden Apps
         private const val KEY_HIDDEN_APPS = "hidden_apps"
 
+        // App Descriptions
+        private const val KEY_APP_DESCRIPTIONS = "app_descriptions"
+
         // Tag Button
         private const val KEY_TAG_BUTTON_POSITION = "tag_button_position"
         private const val KEY_TAG_BUTTON_OFFSET_X = "tag_button_offset_x"
@@ -212,6 +215,49 @@ class PreferencesManager(context: Context) {
 
     fun isAppHidden(packageName: String): Boolean {
         return getHiddenApps().contains(packageName)
+    }
+
+    // ==================== App Descriptions ====================
+
+    private fun getAppDescriptions(): Map<String, String> {
+        val json = prefs.getString(KEY_APP_DESCRIPTIONS, "{}") ?: "{}"
+        return try {
+            val jsonObject = JSONObject(json)
+            val result = mutableMapOf<String, String>()
+            jsonObject.keys().forEach { key ->
+                val value = jsonObject.optString(key, "")
+                if (value.isNotBlank()) {
+                    result[key] = value
+                }
+            }
+            result
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun saveAppDescriptions(descriptions: Map<String, String>) {
+        val jsonObject = JSONObject()
+        descriptions.forEach { (packageName, description) ->
+            if (description.isNotBlank()) {
+                jsonObject.put(packageName, description)
+            }
+        }
+        prefs.edit().putString(KEY_APP_DESCRIPTIONS, jsonObject.toString()).apply()
+    }
+
+    fun getAppDescription(packageName: String): String? {
+        return getAppDescriptions()[packageName]?.takeIf { it.isNotBlank() }
+    }
+
+    fun setAppDescription(packageName: String, description: String) {
+        val descriptions = getAppDescriptions().toMutableMap()
+        if (description.isBlank()) {
+            descriptions.remove(packageName)
+        } else {
+            descriptions[packageName] = description
+        }
+        saveAppDescriptions(descriptions)
     }
 
     // ==================== Tag Button ====================
@@ -404,6 +450,13 @@ class PreferencesManager(context: Context) {
             saveAppTagAssociations(associations)
             // Also clean up any orphan tags
             removeOrphanTags()
+        }
+
+        val descriptions = getAppDescriptions().toMutableMap()
+        val uninstalledDescriptions = descriptions.keys.filter { !installedPackages.contains(it) }
+        if (uninstalledDescriptions.isNotEmpty()) {
+            uninstalledDescriptions.forEach { descriptions.remove(it) }
+            saveAppDescriptions(descriptions)
         }
     }
 

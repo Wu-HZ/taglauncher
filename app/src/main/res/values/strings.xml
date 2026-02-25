@@ -2,6 +2,7 @@
     <string name="app_name">TagLauncher</string>
     <string name="app_icon_description">App icon</string>
     <string name="app_info">App Info</string>
+    <string name="description">Description</string>
     <string name="uninstall">Uninstall</string>
     <string name="remove_from_dock">Remove from Dock</string>
     <string name="search_apps">Search apps...</string>

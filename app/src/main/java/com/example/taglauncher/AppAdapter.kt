@@ -5,19 +5,22 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Outline
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
+import android.text.InputType
+import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.EditText
 import android.widget.Filter
 import android.widget.Filterable
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 
 class AppAdapter(
     private val context: Context,
@@ -25,6 +28,8 @@ class AppAdapter(
     private val onAppClick: (AppInfo) -> Unit,
     private val onHideApp: ((AppInfo) -> Unit)? = null,
     private val onManageTags: ((AppInfo) -> Unit)? = null,
+    private val getDescription: ((AppInfo) -> String?)? = null,
+    private val setDescription: ((AppInfo, String) -> Unit)? = null,
     private var showLabels: Boolean = true,
     private var iconSizeDp: Int = 48
 ) : RecyclerView.Adapter<AppAdapter.AppViewHolder>(), Filterable {
@@ -90,8 +95,8 @@ class AppAdapter(
             onAppClick(appInfo)
         }
 
-        holder.itemView.setOnLongClickListener { view ->
-            showContextMenu(view, appInfo)
+        holder.itemView.setOnLongClickListener {
+            showContextMenu(appInfo)
             true
         }
     }
@@ -136,32 +141,108 @@ class AppAdapter(
 
     override fun getItemCount(): Int = filteredList.size
 
-    private fun showContextMenu(view: View, appInfo: AppInfo) {
-        val popup = PopupMenu(context, view)
-        popup.menuInflater.inflate(R.menu.app_context_menu, popup.menu)
+    private fun showContextMenu(appInfo: AppInfo) {
+        val density = context.resources.displayMetrics.density
+        fun dpToPx(dp: Int): Int = (dp * density).toInt()
 
-        popup.setOnMenuItemClickListener { menuItem ->
-            when (menuItem.itemId) {
-                R.id.action_tags -> {
-                    onManageTags?.invoke(appInfo)
-                    true
+        val initialDescription = getDescription?.invoke(appInfo)?.trim().orEmpty()
+
+        val actionsContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        var dialog: androidx.appcompat.app.AlertDialog? = null
+        var shouldSave = true
+        var hasSaved = false
+
+        val descriptionInput = EditText(context).apply {
+            hint = context.getString(R.string.description)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            minLines = 3
+            maxLines = 6
+            setText(initialDescription)
+            setSelection(text.length)
+        }
+
+        fun persistDescription() {
+            if (hasSaved || setDescription == null) return
+            val updated = descriptionInput.text.toString().trim()
+            if (updated != initialDescription) {
+                setDescription.invoke(appInfo, updated)
+            }
+            hasSaved = true
+        }
+
+        fun addAction(label: String, action: () -> Unit) {
+            val item = TextView(context).apply {
+                text = label
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12))
+                val outValue = TypedValue()
+                if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)) {
+                    setBackgroundResource(outValue.resourceId)
                 }
-                R.id.action_app_info -> {
-                    openAppInfo(appInfo.packageName)
-                    true
+                setOnClickListener {
+                    persistDescription()
+                    dialog?.dismiss()
+                    action()
                 }
-                R.id.action_uninstall -> {
-                    uninstallApp(appInfo.packageName)
-                    true
-                }
-                R.id.action_hide_app -> {
-                    onHideApp?.invoke(appInfo)
-                    true
-                }
-                else -> false
+            }
+            actionsContainer.addView(item)
+        }
+
+        if (onManageTags != null) {
+            addAction(context.getString(R.string.tags)) { onManageTags.invoke(appInfo) }
+        }
+        if (onHideApp != null) {
+            addAction(context.getString(R.string.hide_app)) { onHideApp.invoke(appInfo) }
+        }
+        addAction(context.getString(R.string.app_info)) { openAppInfo(appInfo.packageName) }
+        addAction(context.getString(R.string.uninstall)) { uninstallApp(appInfo.packageName) }
+
+        val descriptionLabel = TextView(context).apply {
+            text = context.getString(R.string.description)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setTextColor(Color.GRAY)
+            setPadding(dpToPx(12), dpToPx(16), dpToPx(12), dpToPx(4))
+        }
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(8))
+            addView(actionsContainer)
+            addView(descriptionLabel)
+            addView(descriptionInput)
+        }
+
+        val scrollView = ScrollView(context).apply {
+            addView(container)
+        }
+
+        dialog = MaterialAlertDialogBuilder(context)
+            .setTitle(appInfo.label)
+            .setView(scrollView)
+            .setPositiveButton(android.R.string.ok) { _, _ -> }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> shouldSave = false }
+            .create()
+
+        dialog.setOnDismissListener {
+            if (shouldSave) {
+                persistDescription()
             }
         }
-        popup.show()
+
+        dialog.show()
     }
 
     private fun openAppInfo(packageName: String) {
