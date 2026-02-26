@@ -194,6 +194,15 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (isHomeIntent(intent) && (currentTagFilter != null || showHiddenAppsOnly)) {
+            clearTagFilter()
+        }
+    }
+
+    private fun isHomeIntent(intent: Intent): Boolean {
+        val action = intent.action
+        val categories = intent.categories
+        return action == Intent.ACTION_MAIN && categories?.contains(Intent.CATEGORY_HOME) == true
     }
 
     private fun initViews() {
@@ -1455,6 +1464,15 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
+                // Clear tag filter (including Hidden)
+                val hasComponentTagFilter = getAppDrawerComponents().any { component ->
+                    (component as? AppDrawerComponent)?.isTagFilterActive() == true
+                }
+                if (currentTagFilter != null || showHiddenAppsOnly || hasComponentTagFilter) {
+                    clearTagFilter()
+                    return
+                }
+
                 // Clear search in search bar components
                 layoutManager.getComponentsByType(ComponentType.SEARCH_BAR).forEach { component ->
                     val searchBar = component as? SearchBarComponent
@@ -1464,10 +1482,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Clear tag filter
-                if (currentTagFilter != null) {
-                    clearTagFilter()
-                }
             }
         })
     }

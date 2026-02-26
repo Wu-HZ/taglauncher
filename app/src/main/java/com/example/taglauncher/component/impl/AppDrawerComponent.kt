@@ -347,6 +347,10 @@ class AppDrawerComponent(
         }
     }
 
+    fun isTagFilterActive(): Boolean {
+        return currentFilterTag != null && currentFilterTag != "all"
+    }
+
     /**
      * Apply text filter for search.
      */
