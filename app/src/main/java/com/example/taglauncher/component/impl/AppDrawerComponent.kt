@@ -14,6 +14,7 @@ import com.example.taglauncher.AppAdapter
 import com.example.taglauncher.AppIconEditContext
 import com.example.taglauncher.AppInfo
 import com.example.taglauncher.GridSpacingItemDecoration
+import com.example.taglauncher.MainActivity
 import com.example.taglauncher.PreferencesManager
 import com.example.taglauncher.component.BaseDesktopComponent
 import com.example.taglauncher.component.ComponentType
@@ -54,6 +55,7 @@ class AppDrawerComponent(
     // Callbacks for external handling
     var onAppClick: ((AppInfo) -> Unit)? = null
     var onHideApp: ((AppInfo) -> Unit)? = null
+    var onUnhideApp: ((AppInfo) -> Unit)? = null
     var onManageTags: ((AppInfo) -> Unit)? = null
     var onManageTagsBatch: ((List<AppInfo>) -> Unit)? = null
     var onEditIcon: ((AppInfo, AppIconEditContext) -> Unit)? = null
@@ -139,6 +141,11 @@ class AppDrawerComponent(
                 reloadVisibleApps()
                 appAdapter.updateList(visibleApps)
             },
+            onUnhideApp = { appInfo ->
+                onUnhideApp?.invoke(appInfo)
+                reloadVisibleApps()
+                appAdapter.updateList(visibleApps)
+            },
             onManageTags = { appInfo -> onManageTags?.invoke(appInfo) },
             onEditIcon = { appInfo ->
                 val iconFrameSize = getSetting("iconFrameSize", getSetting("iconSize", 48))
@@ -160,6 +167,7 @@ class AppDrawerComponent(
             getIconOverride = { packageName ->
                 preferencesManager.getEffectiveIconOverride(componentId, packageName)
             },
+            isAppHidden = { appInfo -> preferencesManager.isAppHidden(appInfo.packageName) },
             iconFrameBackgroundColor = getSetting("iconFrameBackgroundColor", Color.TRANSPARENT),
             showLabels = getSetting("showLabels", true),
             iconFrameSizeDp = getSetting("iconFrameSize", getSetting("iconSize", 48)),
@@ -306,9 +314,14 @@ class AppDrawerComponent(
 
     private fun reloadVisibleApps() {
         val hiddenApps = preferencesManager.getHiddenApps()
-        val baseApps = allApps.filter { !hiddenApps.contains(it.packageName) }
+        val showingHidden = currentFilterTag == MainActivity.HIDDEN_TAG_ID
+        val baseApps = if (showingHidden) {
+            allApps.filter { hiddenApps.contains(it.packageName) }
+        } else {
+            allApps.filter { !hiddenApps.contains(it.packageName) }
+        }
 
-        val filteredApps = if (currentFilterTag == null) {
+        val filteredApps = if (currentFilterTag == null || showingHidden) {
             baseApps
         } else {
             val taggedPackages = preferencesManager.getAppsWithTag(currentFilterTag!!)

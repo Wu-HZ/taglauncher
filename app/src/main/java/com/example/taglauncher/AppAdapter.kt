@@ -33,11 +33,13 @@ class AppAdapter(
     private var appList: List<AppInfo>,
     private val onAppClick: (AppInfo) -> Unit,
     private val onHideApp: ((AppInfo) -> Unit)? = null,
+    private val onUnhideApp: ((AppInfo) -> Unit)? = null,
     private val onManageTags: ((AppInfo) -> Unit)? = null,
     private val onEditIcon: ((AppInfo) -> Unit)? = null,
     private val getDescription: ((AppInfo) -> String?)? = null,
     private val setDescription: ((AppInfo, String) -> Unit)? = null,
     private val getIconOverride: ((String) -> AppIconOverride?)? = null,
+    private val isAppHidden: ((AppInfo) -> Boolean)? = null,
     private var iconFrameBackgroundColor: Int = Color.TRANSPARENT,
     private var showLabels: Boolean = true,
     private var iconFrameSizeDp: Int = 48,
@@ -283,7 +285,14 @@ class AppAdapter(
             addAction(context.getString(R.string.tags)) { onManageTags.invoke(appInfo) }
         }
         if (onHideApp != null) {
-            addAction(context.getString(R.string.hide_app)) { onHideApp.invoke(appInfo) }
+            val hidden = isAppHidden?.invoke(appInfo) == true
+            if (hidden) {
+                if (onUnhideApp != null) {
+                    addAction(context.getString(R.string.show_app)) { onUnhideApp.invoke(appInfo) }
+                }
+            } else {
+                addAction(context.getString(R.string.hide_app)) { onHideApp.invoke(appInfo) }
+            }
         }
         addAction(context.getString(R.string.app_info)) { openAppInfo(appInfo.packageName) }
         addAction(context.getString(R.string.uninstall)) { uninstallApp(appInfo.packageName) }

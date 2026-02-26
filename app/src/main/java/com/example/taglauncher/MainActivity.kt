@@ -122,12 +122,14 @@ class MainActivity : AppCompatActivity() {
     private var isTagMenuActive = false
     private var lastSelectedTagId: String? = null
     private var currentTagFilter: TagItem? = null
+    private var showHiddenAppsOnly = false
 
     // Ribbon action mode
     private var currentRibbonAction: String? = null
 
     companion object {
         const val ALL_TAG_ID = "all"
+        const val HIDDEN_TAG_ID = "hidden"
         const val RIBBON_ACTION_EDIT_TAG = "ribbon_edit_tag"
         const val RIBBON_ACTION_EDIT_APPS = "ribbon_edit_apps"
         const val RIBBON_ACTION_PIN_TAG = "ribbon_pin_tag"
@@ -296,13 +298,14 @@ class MainActivity : AppCompatActivity() {
     private fun wireUpComponent(component: DesktopComponent) {
         when (component) {
             is AppDrawerComponent -> {
-                component.setAllAppsProvider { visibleApps }
+                component.setAllAppsProvider { allApps }
                 component.onAppClick = { appInfo ->
                     launchApp(appInfo.packageName)
                     // Clear search filter after launching app
                     clearSearchFilter()
                 }
                 component.onHideApp = { appInfo -> hideApp(appInfo) }
+                component.onUnhideApp = { appInfo -> unhideApp(appInfo) }
                 component.onManageTags = { appInfo ->
                     showTagsDialog(appInfo) { changed ->
                         if (changed) {
@@ -1672,26 +1675,39 @@ class MainActivity : AppCompatActivity() {
 
     private fun reloadVisibleApps() {
         val hiddenApps = preferencesManager.getHiddenApps()
-        visibleApps = allApps.filter { !hiddenApps.contains(it.packageName) }
+        visibleApps = if (showHiddenAppsOnly) {
+            allApps.filter { hiddenApps.contains(it.packageName) }
+        } else {
+            allApps.filter { !hiddenApps.contains(it.packageName) }
+        }
     }
 
     private fun filterAppsByTag(tag: TagItem) {
+        showHiddenAppsOnly = tag.id == HIDDEN_TAG_ID
         currentTagFilter = if (tag.id == "all") null else tag
 
+        reloadVisibleApps()
+
         if (currentTagFilter == null) {
-            reloadVisibleApps()
             getAppDrawerComponents().forEach { component ->
                 (component as? AppDrawerComponent)?.filterByTag(null)
             }
         } else {
-            getAppDrawerComponents().forEach { component ->
-                (component as? AppDrawerComponent)?.filterByTag(tag.id)
+            if (tag.id == HIDDEN_TAG_ID) {
+                getAppDrawerComponents().forEach { component ->
+                    (component as? AppDrawerComponent)?.filterByTag(HIDDEN_TAG_ID)
+                }
+            } else {
+                getAppDrawerComponents().forEach { component ->
+                    (component as? AppDrawerComponent)?.filterByTag(tag.id)
+                }
             }
         }
     }
 
     private fun clearTagFilter() {
         currentTagFilter = null
+        showHiddenAppsOnly = false
         reloadVisibleApps()
         getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.filterByTag(null)
@@ -1703,6 +1719,13 @@ class MainActivity : AppCompatActivity() {
         reloadVisibleApps()
         refreshComponents()
         Toast.makeText(this, "${appInfo.label} hidden", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun unhideApp(appInfo: AppInfo) {
+        preferencesManager.unhideApp(appInfo.packageName)
+        reloadVisibleApps()
+        refreshComponents()
+        Toast.makeText(this, "${appInfo.label} shown", Toast.LENGTH_SHORT).show()
     }
 
     private fun showTagsDialog(appInfo: AppInfo, onTagsUpdated: ((Boolean) -> Unit)? = null) {
@@ -2472,7 +2495,11 @@ class MainActivity : AppCompatActivity() {
         val userTags = preferencesManager.getAllTags()
         val pinnedPositions = preferencesManager.getPinnedTagPositions()
         val allTag = TagItem(ALL_TAG_ID, "All", android.graphics.Color.parseColor("#78909C"))
-        val validTagIds = userTags.map { it.id }.toMutableSet().apply { add(ALL_TAG_ID) }
+        val hiddenTag = TagItem(HIDDEN_TAG_ID, "Hidden", android.graphics.Color.parseColor("#90A4AE"))
+        val validTagIds = userTags.map { it.id }.toMutableSet().apply {
+            add(ALL_TAG_ID)
+            add(HIDDEN_TAG_ID)
+        }
 
         preferencesManager.cleanupInvalidPins(validTagIds)
 
@@ -2507,6 +2534,21 @@ class MainActivity : AppCompatActivity() {
             } else {
                 unpinnedTags.add(0, allTag)
             }
+        }
+
+        var hiddenPlaced = false
+        val hiddenRingIndex = 3
+        val hiddenSlotIndex = ringSizes.getOrNull(hiddenRingIndex)?.minus(2) ?: -1
+        if (hiddenSlotIndex >= 0 && hiddenRingIndex < rings.size) {
+            val ring = rings[hiddenRingIndex].toMutableList()
+            if (hiddenSlotIndex < ring.size && ring[hiddenSlotIndex] == null) {
+                ring[hiddenSlotIndex] = hiddenTag
+                rings[hiddenRingIndex] = ring
+                hiddenPlaced = true
+            }
+        }
+        if (!hiddenPlaced) {
+            unpinnedTags.add(hiddenTag)
         }
 
         for (ringIndex in 0 until 4) {
