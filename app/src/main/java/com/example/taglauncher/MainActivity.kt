@@ -497,10 +497,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Only process global gestures if not disabled by child views (e.g., AppGridComponent)
+        // Only process global gestures if not disabled by child views or transient overlays.
         val isManagePagesVisible =
             ::managePagesOverlay.isInitialized && managePagesOverlay.visibility == View.VISIBLE
-        if (!isGlobalGestureDisabled && !isManagePagesVisible) {
+        if (!isGlobalGestureDisabled && !isManagePagesVisible && !isTagMenuActive) {
             trackSwipeDownGesture(event)
             scaleGestureDetector.onTouchEvent(event)
             gestureDetector.onTouchEvent(event)
