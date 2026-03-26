@@ -73,6 +73,7 @@ class DesktopCanvasView @JvmOverloads constructor(
     }
 
     var canvasEventListener: CanvasEventListener? = null
+    var onPageChanged: ((Int) -> Unit)? = null
 
     // Edit mode visual indicators
     private val editModeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -124,7 +125,11 @@ class DesktopCanvasView @JvmOverloads constructor(
 
     fun scrollToPage(page: Int, animate: Boolean = true, durationOverrideMs: Int? = null) {
         val targetPage = page.coerceIn(0, pageCount - 1)
+        val previousPage = currentPage
         currentPage = targetPage
+        if (previousPage != targetPage) {
+            onPageChanged?.invoke(targetPage)
+        }
         val pageWidth = if (width > 0) width else context.resources.displayMetrics.widthPixels
         if (pageWidth == 0) {
             return

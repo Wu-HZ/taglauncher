@@ -3,6 +3,7 @@ package com.example.taglauncher.component.impl
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.view.MotionEvent
 import android.view.View
@@ -465,12 +466,104 @@ class AppDrawerComponent(
      */
     fun getVisibleApps(): List<AppInfo> = visibleApps
 
+    fun supportsTouchpadSelection(): Boolean {
+        if (!::recyclerView.isInitialized || !::appAdapter.isInitialized) return false
+        if (appAdapter.itemCount == 0 || recyclerView.width == 0 || recyclerView.height == 0) return false
+        return !recyclerView.canScrollVertically(-1) && !recyclerView.canScrollVertically(1)
+    }
+
+    fun updateTouchpadHighlight(normalizedX: Float, normalizedY: Float): AppInfo? {
+        if (!supportsTouchpadSelection()) {
+            clearTouchpadHighlight()
+            return null
+        }
+
+        val contentBounds = getVisibleChildBounds() ?: run {
+            clearTouchpadHighlight()
+            return null
+        }
+
+        val targetX = contentBounds.left + (contentBounds.width() * normalizedX.coerceIn(0f, 1f))
+        val targetY = contentBounds.top + (contentBounds.height() * normalizedY.coerceIn(0f, 1f))
+        val appInfo = findNearestVisibleApp(targetX, targetY)
+        appAdapter.setTouchpadHighlightedPackage(appInfo?.packageName)
+        return appInfo
+    }
+
+    fun clearTouchpadHighlight() {
+        if (::appAdapter.isInitialized) {
+            appAdapter.setTouchpadHighlightedPackage(null)
+        }
+    }
+
+    fun launchTouchpadHighlightedApp(): AppInfo? {
+        val appInfo = if (::appAdapter.isInitialized) {
+            appAdapter.getTouchpadHighlightedApp()
+        } else {
+            null
+        } ?: return null
+
+        if (!isInEditMode) {
+            onAppClick?.invoke(appInfo)
+        }
+        return appInfo
+    }
+
     private fun loadExcludedPackages(): MutableSet<String> {
         val raw = getSetting("excludedPackages", "")
         return raw.split(",")
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .toMutableSet()
+    }
+
+    private fun getVisibleChildBounds(): RectF? {
+        if (recyclerView.childCount == 0) return null
+
+        var left = Float.MAX_VALUE
+        var top = Float.MAX_VALUE
+        var right = Float.MIN_VALUE
+        var bottom = Float.MIN_VALUE
+
+        for (index in 0 until recyclerView.childCount) {
+            val child = recyclerView.getChildAt(index)
+            left = minOf(left, child.left.toFloat())
+            top = minOf(top, child.top.toFloat())
+            right = maxOf(right, child.right.toFloat())
+            bottom = maxOf(bottom, child.bottom.toFloat())
+        }
+
+        if (left == Float.MAX_VALUE || top == Float.MAX_VALUE) {
+            return null
+        }
+
+        return RectF(left, top, right, bottom)
+    }
+
+    private fun findNearestVisibleApp(targetX: Float, targetY: Float): AppInfo? {
+        var bestAdapterPosition = RecyclerView.NO_POSITION
+        var bestDistance = Float.MAX_VALUE
+
+        for (index in 0 until recyclerView.childCount) {
+            val child = recyclerView.getChildAt(index)
+            val dx = when {
+                targetX < child.left -> child.left - targetX
+                targetX > child.right -> targetX - child.right
+                else -> 0f
+            }
+            val dy = when {
+                targetY < child.top -> child.top - targetY
+                targetY > child.bottom -> targetY - child.bottom
+                else -> 0f
+            }
+            val distance = (dx * dx) + (dy * dy)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                bestAdapterPosition = recyclerView.getChildAdapterPosition(child)
+            }
+        }
+
+        return appAdapter.getFilteredAppAt(bestAdapterPosition)
     }
 
     override fun getSettingsSchema(): List<SettingDefinition> {

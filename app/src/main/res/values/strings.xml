@@ -15,4 +15,5 @@
     <string name="create_new_tag">Create New Tag</string>
     <string name="tag_name">Tag Name</string>
     <string name="select_color">Select Color</string>
+    <string name="touchpad_overlay_description">One-handed app touchpad</string>
 </resources>

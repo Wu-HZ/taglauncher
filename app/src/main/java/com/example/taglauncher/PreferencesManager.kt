@@ -46,6 +46,11 @@ class PreferencesManager(context: Context) {
         private const val KEY_TAG_BUTTON_ALPHA = "tag_button_alpha"
         private const val KEY_TAG_BUTTON_COLOR = "tag_button_color"
 
+        // Touchpad
+        private const val KEY_TOUCHPAD_POSITION = "touchpad_position"
+        private const val KEY_TOUCHPAD_OFFSET_X = "touchpad_offset_x"
+        private const val KEY_TOUCHPAD_OFFSET_Y = "touchpad_offset_y"
+
         // App Tags
         private const val KEY_USER_TAGS = "user_tags"
         private const val KEY_APP_TAG_ASSOCIATIONS = "app_tag_associations"
@@ -414,6 +419,32 @@ class PreferencesManager(context: Context) {
 
     fun setTagButtonColor(color: Int) {
         prefs.edit().putInt(KEY_TAG_BUTTON_COLOR, color).apply()
+    }
+
+    // ==================== Touchpad ====================
+
+    fun getTouchpadPosition(): Int {
+        return prefs.getInt(KEY_TOUCHPAD_POSITION, TAG_POSITION_BOTTOM_RIGHT)
+    }
+
+    fun setTouchpadPosition(position: Int) {
+        prefs.edit().putInt(KEY_TOUCHPAD_POSITION, position.coerceIn(0, 4)).apply()
+    }
+
+    fun getTouchpadOffsetX(): Int {
+        return prefs.getInt(KEY_TOUCHPAD_OFFSET_X, 0)
+    }
+
+    fun setTouchpadOffsetX(offset: Int) {
+        prefs.edit().putInt(KEY_TOUCHPAD_OFFSET_X, offset.coerceIn(-500, 500)).apply()
+    }
+
+    fun getTouchpadOffsetY(): Int {
+        return prefs.getInt(KEY_TOUCHPAD_OFFSET_Y, 0)
+    }
+
+    fun setTouchpadOffsetY(offset: Int) {
+        prefs.edit().putInt(KEY_TOUCHPAD_OFFSET_Y, offset.coerceIn(-500, 500)).apply()
     }
 
     // ==================== App Tags ====================

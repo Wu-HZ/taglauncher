@@ -62,8 +62,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var layoutManager: DesktopLayoutManager
 
     // System UI elements (not components)
+    private lateinit var rootLayout: FrameLayout
     private lateinit var tagFab: FloatingActionButton
     private lateinit var tagRingMenu: TagRingMenuView
+    private lateinit var touchpadOverlay: FloatingTouchpadView
     private lateinit var editModeToolbar: MaterialCardView
     private lateinit var editToolbarDragHandle: MaterialButton
     private lateinit var addComponentButton: MaterialButton
@@ -123,6 +125,7 @@ class MainActivity : AppCompatActivity() {
     private var swipeDownStartTime = 0L
     private var isTrackingSwipeDown = false
     private var isSwipeDownBlockedByHorizontalMotion = false
+    private var isGlobalGestureSuppressedByTouchpad = false
     private var minSwipeDownDistance = 0f
     private var minSwipeDownFlingDistance = 0f
     private var minSwipeDownVelocity = 0f
@@ -132,6 +135,7 @@ class MainActivity : AppCompatActivity() {
     private var lastSelectedTagId: String? = null
     private var currentTagFilter: TagItem? = null
     private var showHiddenAppsOnly = false
+    private var touchpadTargetDrawer: AppDrawerComponent? = null
 
     // Ribbon action mode
     private var currentRibbonAction: String? = null
@@ -198,6 +202,8 @@ class MainActivity : AppCompatActivity() {
         refreshComponents()
         updateTagFabPosition()
         updateTagFabAppearance()
+        updateTouchpadOverlayPosition()
+        updateTouchpadOverlayState()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -215,9 +221,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun initViews() {
+        rootLayout = findViewById(R.id.rootLayout)
         desktopCanvas = findViewById(R.id.desktopCanvas)
+        desktopCanvas.onPageChanged = {
+            updateTouchpadOverlayState()
+        }
         tagFab = findViewById(R.id.tagFab)
         tagRingMenu = findViewById(R.id.tagRingMenu)
+        touchpadOverlay = findViewById(R.id.floatingTouchpad)
         editModeToolbar = findViewById(R.id.editModeToolbar)
         editToolbarDragHandle = findViewById(R.id.editToolbarDragHandle)
         addComponentButton = findViewById(R.id.addComponentButton)
@@ -246,6 +257,7 @@ class MainActivity : AppCompatActivity() {
         managePagesOverlay = findViewById(R.id.managePagesOverlay)
         managePagesRecycler = findViewById(R.id.managePagesRecycler)
         setupManagePagesOverlay()
+        setupTouchpadOverlay()
     }
 
     private fun returnToHomePageIfNeeded() {
@@ -267,16 +279,19 @@ class MainActivity : AppCompatActivity() {
             override fun onLayoutLoaded(hasAppGrid: Boolean) {
                 updateTagFabVisibility()
                 wireUpComponents()
+                updateTouchpadOverlayState()
             }
 
             override fun onComponentAdded(component: DesktopComponent) {
                 wireUpComponent(component)
                 updateTagFabVisibility()
+                updateTouchpadOverlayState()
             }
 
             override fun onComponentRemoved(componentId: String) {
                 updateTagFabVisibility()
                 hideComponentToolbar()
+                updateTouchpadOverlayState()
             }
 
             override fun onComponentsChanged() {
@@ -369,6 +384,7 @@ class MainActivity : AppCompatActivity() {
         layoutManager.getComponentsByType(ComponentType.APP_GRID).forEach { component ->
             (component as? AppGridComponent)?.refresh()
         }
+        updateTouchpadOverlayState()
     }
 
     private fun getAppDrawerComponents(): List<DesktopComponent> {
@@ -379,6 +395,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateTagFabVisibility() {
         val hasAppDrawer = layoutManager.hasAppDrawerComponent()
         tagFab.visibility = if (hasAppDrawer) View.VISIBLE else View.GONE
+        if (!hasAppDrawer) {
+            hideTouchpadOverlay()
+        }
     }
 
     private fun updateTagFabPosition() {
@@ -439,6 +458,161 @@ class MainActivity : AppCompatActivity() {
         tagFab.layoutParams = params
     }
 
+    private fun setupTouchpadOverlay() {
+        touchpadOverlay.listener = object : FloatingTouchpadView.Listener {
+            override fun onTouchpadMove(normalizedX: Float, normalizedY: Float, inCancelZone: Boolean) {
+                val drawer = touchpadTargetDrawer ?: return
+                if (inCancelZone) {
+                    drawer.clearTouchpadHighlight()
+                } else {
+                    drawer.updateTouchpadHighlight(normalizedX, normalizedY)
+                }
+            }
+
+            override fun onTouchpadRelease(normalizedX: Float, normalizedY: Float, inCancelZone: Boolean) {
+                val drawer = touchpadTargetDrawer ?: return
+                if (inCancelZone) {
+                    drawer.clearTouchpadHighlight()
+                    return
+                }
+                drawer.updateTouchpadHighlight(normalizedX, normalizedY)
+                if (drawer.launchTouchpadHighlightedApp() != null) {
+                    hideTouchpadOverlay()
+                } else {
+                    drawer.clearTouchpadHighlight()
+                }
+            }
+
+            override fun onTouchpadCancel() {
+                touchpadTargetDrawer?.clearTouchpadHighlight()
+            }
+        }
+    }
+
+    private fun updateTouchpadOverlayPosition() {
+        if (!::touchpadOverlay.isInitialized) return
+
+        val position = preferencesManager.getTouchpadPosition()
+        val offsetX = preferencesManager.getTouchpadOffsetX()
+        val offsetY = preferencesManager.getTouchpadOffsetY()
+        val params = touchpadOverlay.layoutParams as FrameLayout.LayoutParams
+
+        params.gravity = when (position) {
+            PreferencesManager.TAG_POSITION_BOTTOM_RIGHT -> android.view.Gravity.BOTTOM or android.view.Gravity.END
+            PreferencesManager.TAG_POSITION_BOTTOM_LEFT -> android.view.Gravity.BOTTOM or android.view.Gravity.START
+            PreferencesManager.TAG_POSITION_BOTTOM_CENTER -> android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+            PreferencesManager.TAG_POSITION_RIGHT_CENTER -> android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+            PreferencesManager.TAG_POSITION_LEFT_CENTER -> android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+            else -> android.view.Gravity.BOTTOM or android.view.Gravity.END
+        }
+
+        val baseSideMargin = dpToPx(16)
+        val baseBottomMargin = dpToPx(160)
+        val baseCenterMargin = dpToPx(16)
+
+        when (position) {
+            PreferencesManager.TAG_POSITION_BOTTOM_RIGHT -> {
+                params.marginEnd = baseSideMargin + offsetX
+                params.marginStart = 0
+                params.bottomMargin = baseBottomMargin - offsetY
+                params.topMargin = 0
+            }
+            PreferencesManager.TAG_POSITION_BOTTOM_LEFT -> {
+                params.marginStart = baseSideMargin + offsetX
+                params.marginEnd = 0
+                params.bottomMargin = baseBottomMargin - offsetY
+                params.topMargin = 0
+            }
+            PreferencesManager.TAG_POSITION_BOTTOM_CENTER -> {
+                params.marginStart = offsetX
+                params.marginEnd = 0
+                params.bottomMargin = baseBottomMargin - offsetY
+                params.topMargin = 0
+            }
+            PreferencesManager.TAG_POSITION_RIGHT_CENTER -> {
+                params.marginEnd = baseCenterMargin + offsetX
+                params.marginStart = 0
+                params.bottomMargin = 0
+                params.topMargin = offsetY
+            }
+            PreferencesManager.TAG_POSITION_LEFT_CENTER -> {
+                params.marginStart = baseCenterMargin + offsetX
+                params.marginEnd = 0
+                params.bottomMargin = 0
+                params.topMargin = offsetY
+            }
+        }
+
+        touchpadOverlay.layoutParams = params
+        if (touchpadOverlay.visibility == View.VISIBLE) {
+            touchpadOverlay.bringToFront()
+        }
+    }
+
+    private fun updateTouchpadOverlayState() {
+        if (!::layoutManager.isInitialized || !::touchpadOverlay.isInitialized) return
+        rootLayout.post { syncTouchpadOverlayState() }
+    }
+
+    private fun syncTouchpadOverlayState() {
+        if (!isTouchpadFilterActive() || isTagMenuActive || layoutManager.isEditMode() || isSearchOverlayVisible || tagFab.visibility != View.VISIBLE) {
+            hideTouchpadOverlay()
+            return
+        }
+
+        val drawer = getPrimaryTouchpadDrawer()
+        if (drawer == null || !drawer.supportsTouchpadSelection()) {
+            hideTouchpadOverlay()
+            return
+        }
+
+        if (touchpadTargetDrawer !== drawer) {
+            touchpadTargetDrawer?.clearTouchpadHighlight()
+        }
+        touchpadTargetDrawer = drawer
+        updateTouchpadOverlayPosition()
+        if (touchpadOverlay.visibility != View.VISIBLE) {
+            touchpadOverlay.visibility = View.VISIBLE
+        }
+    }
+
+    private fun hideTouchpadOverlay(clearHighlight: Boolean = true) {
+        if (!::touchpadOverlay.isInitialized) return
+        touchpadOverlay.cancelTracking()
+        if (clearHighlight) {
+            touchpadTargetDrawer?.clearTouchpadHighlight()
+        }
+        touchpadOverlay.visibility = View.GONE
+        if (clearHighlight) {
+            touchpadTargetDrawer = null
+        }
+    }
+
+    private fun isTouchpadFilterActive(): Boolean {
+        return currentTagFilter != null || showHiddenAppsOnly
+    }
+
+    private fun getPrimaryTouchpadDrawer(): AppDrawerComponent? {
+        val currentPage = desktopCanvas.getCurrentPage()
+        val pageWidthDp = desktopCanvas.getPageWidthDp()
+
+        val pageDrawers = layoutManager.getComponentsByType(ComponentType.APP_DRAWER)
+            .mapNotNull { it as? AppDrawerComponent }
+            .filter { component -> getComponentPageIndex(component, pageWidthDp) == currentPage }
+        if (pageDrawers.isNotEmpty()) {
+            return pageDrawers.first()
+        }
+
+        return getAppDrawerComponents()
+            .mapNotNull { it as? AppDrawerComponent }
+            .firstOrNull { component -> getComponentPageIndex(component, pageWidthDp) == currentPage }
+    }
+
+    private fun getComponentPageIndex(component: DesktopComponent, pageWidthDp: Float): Int {
+        if (pageWidthDp <= 0f) return 0
+        return (component.bounds.x / pageWidthDp).toInt().coerceAtLeast(0)
+    }
+
     private fun updateTagFabAppearance() {
         val icon = preferencesManager.getTagButtonIcon()
         val size = preferencesManager.getTagButtonSize()
@@ -497,10 +671,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        updateTouchpadGestureSuppression(event)
         // Only process global gestures if not disabled by child views or transient overlays.
         val isManagePagesVisible =
             ::managePagesOverlay.isInitialized && managePagesOverlay.visibility == View.VISIBLE
-        if (!isGlobalGestureDisabled && !isManagePagesVisible && !isTagMenuActive) {
+        if (!isGlobalGestureDisabled && !isManagePagesVisible && !isTagMenuActive && !isGlobalGestureSuppressedByTouchpad) {
             trackSwipeDownGesture(event)
             scaleGestureDetector.onTouchEvent(event)
             gestureDetector.onTouchEvent(event)
@@ -508,7 +683,11 @@ class MainActivity : AppCompatActivity() {
             resetSwipeDownTracking()
         }
         // Continue normal event dispatch
-        return super.dispatchTouchEvent(event)
+        val handled = super.dispatchTouchEvent(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) {
+            isGlobalGestureSuppressedByTouchpad = false
+        }
+        return handled
     }
 
     private fun showEditMenu() {
@@ -730,6 +909,7 @@ class MainActivity : AppCompatActivity() {
         layoutManager.enterEditMode()
         editModeToolbar.visibility = View.VISIBLE
         tagFab.visibility = View.GONE
+        hideTouchpadOverlay()
         updatePasteButtonState()
     }
 
@@ -748,6 +928,7 @@ class MainActivity : AppCompatActivity() {
         componentToolbar.translationX = 0f
         componentToolbar.translationY = 0f
         updateTagFabVisibility()
+        updateTouchpadOverlayState()
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -992,8 +1173,7 @@ class MainActivity : AppCompatActivity() {
                     applyRibbonActionToTag(tag, ringIndex, segmentIndex)
                 } else {
                     filterAppsByTag(tag)
-                    isTagMenuActive = false
-                    tagRingMenu.hide()
+                    closeTagMenu()
                 }
             } else {
                 if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
@@ -1001,8 +1181,7 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     showPinTagDialog(ringIndex, segmentIndex)
                 } else if (currentRibbonAction == null) {
-                    isTagMenuActive = false
-                    tagRingMenu.hide()
+                    closeTagMenu()
                 }
             }
         }
@@ -1048,8 +1227,7 @@ class MainActivity : AppCompatActivity() {
                             } else if (currentRibbonAction != null) {
                                 applyRibbonActionToTag(selectedTag, ringIndex, segmentIndex)
                             } else {
-                                isTagMenuActive = false
-                                tagRingMenu.hide()
+                                closeTagMenu()
                             }
                         } else {
                             if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
@@ -1057,8 +1235,7 @@ class MainActivity : AppCompatActivity() {
                             ) {
                                 showPinTagDialog(ringIndex, segmentIndex)
                             } else if (currentRibbonAction == null) {
-                                isTagMenuActive = false
-                                tagRingMenu.hide()
+                                closeTagMenu()
                             }
                         }
                     }
@@ -1076,8 +1253,7 @@ class MainActivity : AppCompatActivity() {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
                     tagRingMenu.setAllowEmptySelection(false)
-                    isTagMenuActive = false
-                    tagRingMenu.hide()
+                    closeTagMenu()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_EDIT_TAG
                     tagRingMenu.setShowPinIndicators(false)
@@ -1090,8 +1266,7 @@ class MainActivity : AppCompatActivity() {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
                     tagRingMenu.setAllowEmptySelection(false)
-                    isTagMenuActive = false
-                    tagRingMenu.hide()
+                    closeTagMenu()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_EDIT_APPS
                     tagRingMenu.setShowPinIndicators(false)
@@ -1104,8 +1279,7 @@ class MainActivity : AppCompatActivity() {
                     currentRibbonAction = null
                     tagRingMenu.setShowPinIndicators(false)
                     tagRingMenu.setAllowEmptySelection(false)
-                    isTagMenuActive = false
-                    tagRingMenu.hide()
+                    closeTagMenu()
                 } else {
                     currentRibbonAction = RIBBON_ACTION_PIN_TAG
                     tagRingMenu.setShowPinIndicators(true)
@@ -1114,6 +1288,12 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun closeTagMenu() {
+        isTagMenuActive = false
+        tagRingMenu.hide()
+        updateTouchpadOverlayState()
     }
 
     private fun applyRibbonActionToTag(tag: TagItem, ringIndex: Int, segmentIndex: Int) {
@@ -1421,6 +1601,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showTagMenu() {
         isTagMenuActive = true
+        hideTouchpadOverlay()
 
         val fabLocation = IntArray(2)
         tagFab.getLocationInWindow(fabLocation)
@@ -1514,6 +1695,22 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         })
+    }
+
+    private fun updateTouchpadGestureSuppression(event: MotionEvent) {
+        if (!::touchpadOverlay.isInitialized || touchpadOverlay.visibility != View.VISIBLE) {
+            isGlobalGestureSuppressedByTouchpad = false
+            return
+        }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                isGlobalGestureSuppressedByTouchpad =
+                    touchpadOverlay.isScreenPointInInteractiveArea(event.rawX, event.rawY)
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                isGlobalGestureSuppressedByTouchpad = false
+            }
+        }
     }
 
     private fun trackSwipeDownGesture(event: MotionEvent) {
@@ -1640,6 +1837,7 @@ class MainActivity : AppCompatActivity() {
     private fun showSearchOverlay() {
         if (isSearchOverlayVisible) return
         isSearchOverlayVisible = true
+        hideTouchpadOverlay()
 
         // Clear previous search
         searchOverlayInput.text.clear()
@@ -1677,6 +1875,7 @@ class MainActivity : AppCompatActivity() {
             .setInterpolator(android.view.animation.AccelerateInterpolator())
             .withEndAction {
                 searchOverlay.visibility = View.GONE
+                updateTouchpadOverlayState()
             }
             .start()
     }
@@ -1774,6 +1973,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        updateTouchpadOverlayState()
     }
 
     private fun clearTagFilter() {
@@ -1783,6 +1983,7 @@ class MainActivity : AppCompatActivity() {
         getAppDrawerComponents().forEach { component ->
             (component as? AppDrawerComponent)?.filterByTag(null)
         }
+        hideTouchpadOverlay()
     }
 
     private fun hideApp(appInfo: AppInfo) {

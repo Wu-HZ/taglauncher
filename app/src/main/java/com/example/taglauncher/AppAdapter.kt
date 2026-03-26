@@ -55,6 +55,7 @@ class AppAdapter(
 ) : RecyclerView.Adapter<AppAdapter.AppViewHolder>(), Filterable {
 
     private var filteredList: List<AppInfo> = appList
+    private var highlightedPackageName: String? = null
 
     // Additional style properties
     private var iconShape: String = "default"
@@ -85,6 +86,7 @@ class AppAdapter(
         val appIconBackground: ImageView = itemView.findViewById(R.id.appIconBackground)
         val appIcon: ImageView = itemView.findViewById(R.id.appIcon)
         val appLabel: TextView = itemView.findViewById(R.id.appLabel)
+        val touchpadHighlight: View = itemView.findViewById(R.id.appTouchpadHighlight)
         val selectionOverlay: View = itemView.findViewById(R.id.appSelectionOverlay)
         val selectionCheck: ImageView = itemView.findViewById(R.id.appSelectionCheck)
         var boundAppInfo: AppInfo? = null
@@ -101,6 +103,7 @@ class AppAdapter(
         var appliedLabelColor: Int = Int.MIN_VALUE
         var appliedLabelMaxLines: Int = Int.MIN_VALUE
         var appliedLabelMarginTopPx: Int = Int.MIN_VALUE
+        var appliedTouchpadHighlightState: Boolean = false
         var appliedSelectionState: Boolean = false
     }
 
@@ -141,6 +144,7 @@ class AppAdapter(
         val appInfo = filteredList[position]
         holder.boundAppInfo = appInfo
         val isSelected = selectedPackages.contains(appInfo.packageName)
+        val isTouchpadHighlighted = !isSelected && highlightedPackageName == appInfo.packageName
         val iconOverride = getIconOverride?.invoke(appInfo.packageName)
         val scalePercent = (iconOverride?.scalePercent ?: 100).coerceIn(50, 150)
 
@@ -234,6 +238,11 @@ class AppAdapter(
                 }
                 holder.appliedLabelMarginTopPx = labelMarginTopPx
             }
+        }
+
+        if (holder.appliedTouchpadHighlightState != isTouchpadHighlighted) {
+            holder.touchpadHighlight.visibility = if (isTouchpadHighlighted) View.VISIBLE else View.GONE
+            holder.appliedTouchpadHighlightState = isTouchpadHighlighted
         }
 
         if (holder.appliedSelectionState != isSelected) {
@@ -704,6 +713,9 @@ class AppAdapter(
     fun updateList(newList: List<AppInfo>) {
         appList = newList
         filteredList = newList
+        if (highlightedPackageName != null && newList.none { it.packageName == highlightedPackageName }) {
+            highlightedPackageName = null
+        }
         if (selectedPackages.isNotEmpty()) {
             val validPackages = newList.map { it.packageName }.toSet()
             selectedPackages.retainAll(validPackages)
@@ -712,6 +724,24 @@ class AppAdapter(
         }
         notifyDataSetChanged()
         preloadRenderedAssets(filteredList)
+    }
+
+    fun getFilteredAppAt(position: Int): AppInfo? {
+        return filteredList.getOrNull(position)
+    }
+
+    fun getTouchpadHighlightedApp(): AppInfo? {
+        val highlightedPackage = highlightedPackageName ?: return null
+        return filteredList.firstOrNull { it.packageName == highlightedPackage }
+    }
+
+    fun setTouchpadHighlightedPackage(packageName: String?) {
+        if (highlightedPackageName == packageName) return
+
+        val previousPackage = highlightedPackageName
+        highlightedPackageName = packageName
+        notifyPackageChanged(previousPackage)
+        notifyPackageChanged(packageName)
     }
 
     fun getSelectedApps(): List<AppInfo> {
@@ -840,9 +870,20 @@ class AppAdapter(
             @Suppress("UNCHECKED_CAST")
             override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
                 filteredList = results?.values as? List<AppInfo> ?: appList
+                if (highlightedPackageName != null && filteredList.none { it.packageName == highlightedPackageName }) {
+                    highlightedPackageName = null
+                }
                 notifyDataSetChanged()
                 preloadRenderedAssets(filteredList)
             }
+        }
+    }
+
+    private fun notifyPackageChanged(packageName: String?) {
+        val targetPackage = packageName ?: return
+        val index = filteredList.indexOfFirst { it.packageName == targetPackage }
+        if (index != -1) {
+            notifyItemChanged(index)
         }
     }
 }

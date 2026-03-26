@@ -156,6 +156,26 @@ class SettingsActivity : AppCompatActivity() {
                 icon = android.R.drawable.ic_menu_crop
             ),
 
+            SettingsItem.Header("Touchpad"),
+            SettingsItem.Choice(
+                id = "touchpad_position",
+                title = "Touchpad Position",
+                summary = getTagPositionLabel(preferencesManager.getTouchpadPosition()),
+                icon = android.R.drawable.ic_menu_myplaces
+            ),
+            SettingsItem.Choice(
+                id = "touchpad_offset_x",
+                title = "Touchpad Horizontal Offset",
+                summary = "${preferencesManager.getTouchpadOffsetX()} px",
+                icon = android.R.drawable.ic_menu_crop
+            ),
+            SettingsItem.Choice(
+                id = "touchpad_offset_y",
+                title = "Touchpad Vertical Offset",
+                summary = "${preferencesManager.getTouchpadOffsetY()} px",
+                icon = android.R.drawable.ic_menu_crop
+            ),
+
             // About Category
             SettingsItem.Header("About"),
             SettingsItem.Info(
@@ -198,6 +218,9 @@ class SettingsActivity : AppCompatActivity() {
             "tag_position" -> showTagPositionDialog()
             "tag_offset_x" -> showTagOffsetDialog(isHorizontal = true)
             "tag_offset_y" -> showTagOffsetDialog(isHorizontal = false)
+            "touchpad_position" -> showTouchpadPositionDialog()
+            "touchpad_offset_x" -> showTouchpadOffsetDialog(isHorizontal = true)
+            "touchpad_offset_y" -> showTouchpadOffsetDialog(isHorizontal = false)
         }
     }
 
@@ -536,6 +559,109 @@ class SettingsActivity : AppCompatActivity() {
                     preferencesManager.setTagButtonOffsetX(0)
                 } else {
                     preferencesManager.setTagButtonOffsetY(0)
+                }
+                refreshSettings()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showTouchpadPositionDialog() {
+        val options = arrayOf(
+            "Bottom Right",
+            "Bottom Left",
+            "Bottom Center",
+            "Right Center",
+            "Left Center"
+        )
+        val currentIndex = preferencesManager.getTouchpadPosition()
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Touchpad Position")
+            .setSingleChoiceItems(options, currentIndex) { dialog, which ->
+                preferencesManager.setTouchpadPosition(which)
+                refreshSettings()
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showTouchpadOffsetDialog(isHorizontal: Boolean) {
+        val title = if (isHorizontal) "Touchpad Horizontal Offset" else "Touchpad Vertical Offset"
+        val currentValue = if (isHorizontal) {
+            preferencesManager.getTouchpadOffsetX()
+        } else {
+            preferencesManager.getTouchpadOffsetY()
+        }
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 16)
+        }
+
+        val valueText = android.widget.TextView(this).apply {
+            text = "$currentValue px"
+            textSize = 18f
+            gravity = android.view.Gravity.CENTER
+        }
+
+        val description = android.widget.TextView(this).apply {
+            text = if (isHorizontal) {
+                "Negative = Left, Positive = Right"
+            } else {
+                "Negative = Up, Positive = Down"
+            }
+            textSize = 12f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(android.graphics.Color.GRAY)
+        }
+
+        val seekBar = android.widget.SeekBar(this).apply {
+            max = 1000
+            progress = currentValue + 500
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: android.widget.SeekBar?, progress: Int, fromUser: Boolean) {
+                    val value = progress - 500
+                    valueText.text = "$value px"
+                }
+
+                override fun onStartTrackingTouch(seekBar: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: android.widget.SeekBar?) {}
+            })
+        }
+
+        container.addView(valueText)
+        container.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 16
+            )
+        })
+        container.addView(seekBar)
+        container.addView(android.widget.Space(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 8
+            )
+        })
+        container.addView(description)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setView(container)
+            .setPositiveButton("OK") { _, _ ->
+                val newValue = seekBar.progress - 500
+                if (isHorizontal) {
+                    preferencesManager.setTouchpadOffsetX(newValue)
+                } else {
+                    preferencesManager.setTouchpadOffsetY(newValue)
+                }
+                refreshSettings()
+            }
+            .setNeutralButton("Reset") { _, _ ->
+                if (isHorizontal) {
+                    preferencesManager.setTouchpadOffsetX(0)
+                } else {
+                    preferencesManager.setTouchpadOffsetY(0)
                 }
                 refreshSettings()
             }
