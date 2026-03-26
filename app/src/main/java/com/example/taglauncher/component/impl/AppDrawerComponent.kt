@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import androidx.recyclerview.widget.GridLayoutManager
@@ -47,6 +48,7 @@ class AppDrawerComponent(
     private var selectionCancelButton: MaterialButton? = null
     private var layoutSuppressedForEdit: Boolean = false
     private var pendingLayoutRefresh: Boolean = false
+    private var scrollGestureBlockActive: Boolean = false
 
     private var allApps: List<AppInfo> = emptyList()
     private var visibleApps: List<AppInfo> = emptyList()
@@ -115,6 +117,9 @@ class AppDrawerComponent(
     private fun setupRecyclerView() {
         val columns = getSetting("columns", 4)
         recyclerView.layoutManager = GridLayoutManager(context, columns)
+        recyclerView.setHasFixedSize(true)
+        recyclerView.itemAnimator = null
+        recyclerView.setItemViewCacheSize((columns * 4).coerceAtLeast(12))
 
         // Setup item decoration for spacing
         val horizontalSpacingDp = getSetting("horizontalSpacing", 0)
@@ -193,9 +198,55 @@ class AppDrawerComponent(
         appAdapter.setLabelMarginTop(getSetting("labelMarginTop", 2))
 
         recyclerView.adapter = appAdapter
+        setupScrollTouchHandling()
 
         // Apply maxRows limiting if set
         applyMaxRowsLimit()
+    }
+
+    private fun setupScrollTouchHandling() {
+        fun blockAllParentInterception(view: View, disallow: Boolean) {
+            var parent = view.parent
+            while (parent != null) {
+                parent.requestDisallowInterceptTouchEvent(disallow)
+                parent = (parent as? View)?.parent
+            }
+        }
+
+        recyclerView.setOnTouchListener { view, event ->
+            if (isInEditMode) {
+                return@setOnTouchListener false
+            }
+
+            val canScrollVertically =
+                recyclerView.canScrollVertically(-1) || recyclerView.canScrollVertically(1)
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (canScrollVertically) {
+                        scrollGestureBlockActive = true
+                        MainActivity.isGlobalGestureDisabled = true
+                        blockAllParentInterception(view, true)
+                    }
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (canScrollVertically) {
+                        blockAllParentInterception(view, true)
+                    }
+                }
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (scrollGestureBlockActive) {
+                        MainActivity.isGlobalGestureDisabled = false
+                        scrollGestureBlockActive = false
+                    }
+                    blockAllParentInterception(view, false)
+                }
+            }
+
+            false
+        }
     }
 
     private fun setupSelectionBar(container: android.widget.FrameLayout) {

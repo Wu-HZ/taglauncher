@@ -3,11 +3,18 @@ package com.example.taglauncher
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.drawable.Drawable
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.util.LruCache
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -25,6 +32,7 @@ import android.widget.FrameLayout
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Locale
+import java.util.concurrent.Executors
 import com.example.taglauncher.AppIconOverride
 import com.example.taglauncher.ColorSettingUtils
 
@@ -60,6 +68,15 @@ class AppAdapter(
     private val selectedPackages = mutableSetOf<String>()
     private var selectionMode = false
     private var longPressEnabled = true
+    private var resolvedIconFrameBackgroundColor: Int =
+        ColorSettingUtils.resolveColor(context, iconFrameBackgroundColor)
+    private val outlineProviderCache = mutableMapOf<String, ViewOutlineProvider>()
+    private val renderedAssetCache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+    private val pendingAssetLoads = mutableSetOf<String>()
+    private val assetExecutor = Executors.newFixedThreadPool(2)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     var onSelectionChanged: ((Int) -> Unit)? = null
 
@@ -70,104 +87,159 @@ class AppAdapter(
         val appLabel: TextView = itemView.findViewById(R.id.appLabel)
         val selectionOverlay: View = itemView.findViewById(R.id.appSelectionOverlay)
         val selectionCheck: ImageView = itemView.findViewById(R.id.appSelectionCheck)
+        var boundAppInfo: AppInfo? = null
+        var appliedFrameSizePx: Int = -1
+        var appliedIconSizePx: Int = -1
+        var appliedIconPaddingPx: Int = Int.MIN_VALUE
+        var appliedIconShapeKey: String = ""
+        var appliedBackgroundKey: String? = null
+        var appliedFrameColor: Int = Int.MIN_VALUE
+        var appliedIconKey: String? = null
+        var appliedLabelVisibility: Int = Int.MIN_VALUE
+        var appliedLabelText: String? = null
+        var appliedLabelSizeSp: Int = Int.MIN_VALUE
+        var appliedLabelColor: Int = Int.MIN_VALUE
+        var appliedLabelMaxLines: Int = Int.MIN_VALUE
+        var appliedLabelMarginTopPx: Int = Int.MIN_VALUE
+        var appliedSelectionState: Boolean = false
+    }
+
+    init {
+        setHasStableIds(true)
+        preloadRenderedAssets(filteredList)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): AppViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_app, parent, false)
-        return AppViewHolder(view)
+        return AppViewHolder(view).also { holder ->
+            holder.itemView.setOnClickListener {
+                val appInfo = holder.boundAppInfo ?: return@setOnClickListener
+                if (selectionMode) {
+                    toggleSelection(appInfo)
+                } else {
+                    onAppClick(appInfo)
+                }
+            }
+
+            holder.itemView.setOnLongClickListener {
+                val appInfo = holder.boundAppInfo ?: return@setOnLongClickListener false
+                if (!longPressEnabled) {
+                    return@setOnLongClickListener false
+                }
+                if (selectionMode) {
+                    toggleSelection(appInfo)
+                } else {
+                    showContextMenu(appInfo)
+                }
+                true
+            }
+        }
     }
 
     override fun onBindViewHolder(holder: AppViewHolder, position: Int) {
         val appInfo = filteredList[position]
+        holder.boundAppInfo = appInfo
         val isSelected = selectedPackages.contains(appInfo.packageName)
         val iconOverride = getIconOverride?.invoke(appInfo.packageName)
         val scalePercent = (iconOverride?.scalePercent ?: 100).coerceIn(50, 150)
+
         // Apply icon frame size
         val iconFrameSizePx = (iconFrameSizeDp * density).toInt()
-        holder.appIconFrame.layoutParams.width = iconFrameSizePx
-        holder.appIconFrame.layoutParams.height = iconFrameSizePx
+        if (holder.appliedFrameSizePx != iconFrameSizePx) {
+            holder.appIconFrame.layoutParams = holder.appIconFrame.layoutParams.apply {
+                width = iconFrameSizePx
+                height = iconFrameSizePx
+            }
+            holder.appliedFrameSizePx = iconFrameSizePx
+        }
 
         // Apply icon size
         val scaledIconSizeDp = (iconSizeDp * (scalePercent / 100f)).toInt().coerceAtLeast(1)
         val iconSizePx = (scaledIconSizeDp * density).toInt()
-        holder.appIcon.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
+        if (holder.appliedIconSizePx != iconSizePx) {
+            val iconLayoutParams = (holder.appIcon.layoutParams as? FrameLayout.LayoutParams)
+                ?: FrameLayout.LayoutParams(iconSizePx, iconSizePx, Gravity.CENTER)
+            iconLayoutParams.width = iconSizePx
+            iconLayoutParams.height = iconSizePx
+            iconLayoutParams.gravity = Gravity.CENTER
+            holder.appIcon.layoutParams = iconLayoutParams
+            holder.appliedIconSizePx = iconSizePx
+        }
 
         // Apply icon padding
         val iconPaddingPx = (iconPaddingDp * density).toInt()
-        holder.appIcon.setPadding(iconPaddingPx, iconPaddingPx, iconPaddingPx, iconPaddingPx)
+        if (holder.appliedIconPaddingPx != iconPaddingPx) {
+            holder.appIcon.setPadding(iconPaddingPx, iconPaddingPx, iconPaddingPx, iconPaddingPx)
+            holder.appliedIconPaddingPx = iconPaddingPx
+        }
 
         // Apply icon shape clipping
-        applyIconShape(holder.appIconFrame, iconFrameSizePx)
+        val shapeKey = "$iconShape:$iconFrameSizePx"
+        if (holder.appliedIconShapeKey != shapeKey) {
+            applyIconShape(holder.appIconFrame, iconFrameSizePx)
+            holder.appliedIconShapeKey = shapeKey
+        }
 
         val bgImageUri = iconOverride?.backgroundImageUri
-        holder.appIconBackground.setImageDrawable(null)
-        if (bgImageUri != null) {
-            holder.appIconBackground.visibility = View.VISIBLE
-            holder.appIconBackground.setImageURI(Uri.parse(bgImageUri))
-        } else {
-            holder.appIconBackground.visibility = View.GONE
-        }
+        bindBackgroundImage(holder, appInfo, bgImageUri, iconFrameSizePx)
 
         val bgColor = iconOverride?.backgroundColor
         val hasBgImage = iconOverride?.backgroundImageUri != null
-        val resolvedFrameColor = ColorSettingUtils.resolveColor(context, iconFrameBackgroundColor)
-        val fallbackColor = resolvedFrameColor.takeIf { it != Color.TRANSPARENT }
+        val fallbackColor = resolvedIconFrameBackgroundColor.takeIf { it != Color.TRANSPARENT }
         val finalBgColor = when {
             bgColor != null -> bgColor
             hasBgImage -> Color.TRANSPARENT
             fallbackColor != null -> fallbackColor
             else -> Color.TRANSPARENT
         }
-        holder.appIconFrame.setBackgroundColor(finalBgColor)
+        if (holder.appliedFrameColor != finalBgColor) {
+            holder.appIconFrame.setBackgroundColor(finalBgColor)
+            holder.appliedFrameColor = finalBgColor
+        }
 
         val iconUri = iconOverride?.iconUri
-        holder.appIcon.setImageDrawable(null)
-        if (iconUri != null) {
-            holder.appIcon.setImageURI(Uri.parse(iconUri))
-        } else {
-            holder.appIcon.setImageDrawable(appInfo.icon)
-        }
+        bindIcon(holder, appInfo, iconUri, iconSizePx)
 
         // Apply label styling
+        val labelVisibility = if (showLabels) View.VISIBLE else View.GONE
+        if (holder.appliedLabelVisibility != labelVisibility) {
+            holder.appLabel.visibility = labelVisibility
+            holder.appliedLabelVisibility = labelVisibility
+        }
         if (showLabels) {
-            holder.appLabel.text = appInfo.label
-            holder.appLabel.visibility = View.VISIBLE
-            holder.appLabel.textSize = labelSizeSp.toFloat()
-            holder.appLabel.setTextColor(labelColor)
-            holder.appLabel.maxLines = labelMaxLines
-
-            // Apply label margin top
-            val labelParams = holder.appLabel.layoutParams as? LinearLayout.LayoutParams
-            labelParams?.let {
-                it.topMargin = (labelMarginTopDp * density).toInt()
-                holder.appLabel.layoutParams = it
+            if (holder.appliedLabelText != appInfo.label) {
+                holder.appLabel.text = appInfo.label
+                holder.appliedLabelText = appInfo.label
             }
-        } else {
-            holder.appLabel.visibility = View.GONE
+            if (holder.appliedLabelSizeSp != labelSizeSp) {
+                holder.appLabel.textSize = labelSizeSp.toFloat()
+                holder.appliedLabelSizeSp = labelSizeSp
+            }
+            if (holder.appliedLabelColor != labelColor) {
+                holder.appLabel.setTextColor(labelColor)
+                holder.appliedLabelColor = labelColor
+            }
+            if (holder.appliedLabelMaxLines != labelMaxLines) {
+                holder.appLabel.maxLines = labelMaxLines
+                holder.appliedLabelMaxLines = labelMaxLines
+            }
+
+            val labelMarginTopPx = (labelMarginTopDp * density).toInt()
+            if (holder.appliedLabelMarginTopPx != labelMarginTopPx) {
+                val labelParams = holder.appLabel.layoutParams as? LinearLayout.LayoutParams
+                labelParams?.let {
+                    it.topMargin = labelMarginTopPx
+                    holder.appLabel.layoutParams = it
+                }
+                holder.appliedLabelMarginTopPx = labelMarginTopPx
+            }
         }
 
-        holder.selectionOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
-        holder.selectionCheck.visibility = if (isSelected) View.VISIBLE else View.GONE
-
-        holder.itemView.setOnClickListener {
-            if (selectionMode) {
-                toggleSelection(appInfo)
-            } else {
-                onAppClick(appInfo)
-            }
-        }
-
-        holder.itemView.setOnLongClickListener {
-            if (!longPressEnabled) {
-                return@setOnLongClickListener false
-            }
-            if (selectionMode) {
-                toggleSelection(appInfo)
-            } else {
-                showContextMenu(appInfo)
-            }
-            true
+        if (holder.appliedSelectionState != isSelected) {
+            holder.selectionOverlay.visibility = if (isSelected) View.VISIBLE else View.GONE
+            holder.selectionCheck.visibility = if (isSelected) View.VISIBLE else View.GONE
+            holder.appliedSelectionState = isSelected
         }
     }
 
@@ -175,41 +247,275 @@ class AppAdapter(
      * Apply icon shape clipping using ViewOutlineProvider.
      */
     private fun applyIconShape(targetView: View, sizePx: Int) {
-        when (iconShape) {
-            "circle" -> {
-                targetView.outlineProvider = object : ViewOutlineProvider() {
+        val cacheKey = "$iconShape:$sizePx"
+        val outlineProvider = outlineProviderCache.getOrPut(cacheKey) {
+            when (iconShape) {
+                "circle" -> object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
                         outline.setOval(0, 0, sizePx, sizePx)
                     }
                 }
-                targetView.clipToOutline = true
-            }
-            "rounded" -> {
-                targetView.outlineProvider = object : ViewOutlineProvider() {
+                "rounded" -> object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
-                        val cornerRadius = sizePx * 0.2f // 20% corner radius
+                        val cornerRadius = sizePx * 0.2f
                         outline.setRoundRect(0, 0, sizePx, sizePx, cornerRadius)
                     }
                 }
-                targetView.clipToOutline = true
-            }
-            "square" -> {
-                targetView.outlineProvider = object : ViewOutlineProvider() {
+                "square" -> object : ViewOutlineProvider() {
                     override fun getOutline(view: View, outline: Outline) {
                         outline.setRect(0, 0, sizePx, sizePx)
                     }
                 }
+                else -> ViewOutlineProvider.BACKGROUND
+            }
+        }
+
+        when (iconShape) {
+            "circle" -> {
+                targetView.outlineProvider = outlineProvider
+                targetView.clipToOutline = true
+            }
+            "rounded" -> {
+                targetView.outlineProvider = outlineProvider
+                targetView.clipToOutline = true
+            }
+            "square" -> {
+                targetView.outlineProvider = outlineProvider
                 targetView.clipToOutline = true
             }
             else -> {
                 // Default: no clipping
-                targetView.outlineProvider = ViewOutlineProvider.BACKGROUND
+                targetView.outlineProvider = outlineProvider
                 targetView.clipToOutline = false
             }
         }
     }
 
+    override fun getItemId(position: Int): Long = filteredList[position].packageName.hashCode().toLong()
+
     override fun getItemCount(): Int = filteredList.size
+
+    private fun bindBackgroundImage(
+        holder: AppViewHolder,
+        appInfo: AppInfo,
+        backgroundUri: String?,
+        frameSizePx: Int
+    ) {
+        val requestKey = backgroundUri?.let { "bg:$it:$frameSizePx" } ?: ""
+        val keyChanged = holder.appliedBackgroundKey != requestKey
+        holder.appliedBackgroundKey = requestKey
+
+        if (backgroundUri == null) {
+            holder.appIconBackground.setImageDrawable(null)
+            holder.appIconBackground.visibility = View.GONE
+            return
+        }
+
+        holder.appIconBackground.visibility = View.VISIBLE
+        val cachedBitmap = renderedAssetCache.get(requestKey)
+        if (cachedBitmap != null) {
+            holder.appIconBackground.setImageBitmap(cachedBitmap)
+            return
+        }
+
+        if (keyChanged) {
+            holder.appIconBackground.setImageDrawable(null)
+        }
+        if (holder.appIconBackground.drawable == null) {
+            holder.appIconBackground.visibility = View.INVISIBLE
+        }
+
+        loadRenderedAsset(
+            requestKey = requestKey,
+            renderer = { decodeUriBitmap(backgroundUri, frameSizePx, frameSizePx) }
+        ) { bitmap ->
+            if (holder.boundAppInfo?.packageName == appInfo.packageName &&
+                holder.appliedBackgroundKey == requestKey
+            ) {
+                holder.appIconBackground.visibility = View.VISIBLE
+                holder.appIconBackground.setImageBitmap(bitmap)
+            }
+        }
+    }
+
+    private fun bindIcon(
+        holder: AppViewHolder,
+        appInfo: AppInfo,
+        iconUri: String?,
+        iconSizePx: Int
+    ) {
+        val requestKey = iconUri?.let { "icon-uri:$it:$iconSizePx" }
+            ?: "icon-drawable:${appInfo.packageName}:$iconSizePx"
+        val keyChanged = holder.appliedIconKey != requestKey
+        holder.appliedIconKey = requestKey
+
+        val cachedBitmap = renderedAssetCache.get(requestKey)
+        if (cachedBitmap != null) {
+            holder.appIcon.setImageBitmap(cachedBitmap)
+            return
+        }
+
+        if (keyChanged || iconUri == null) {
+            holder.appIcon.setImageDrawable(appInfo.icon)
+        }
+
+        loadRenderedAsset(
+            requestKey = requestKey,
+            renderer = {
+                if (iconUri != null) {
+                    decodeUriBitmap(iconUri, iconSizePx, iconSizePx)
+                } else {
+                    renderDrawableBitmap(appInfo.icon, iconSizePx, iconSizePx)
+                }
+            }
+        ) { bitmap ->
+            if (holder.boundAppInfo?.packageName == appInfo.packageName &&
+                holder.appliedIconKey == requestKey
+            ) {
+                holder.appIcon.setImageBitmap(bitmap)
+            }
+        }
+    }
+
+    private fun preloadRenderedAssets(apps: List<AppInfo>) {
+        if (apps.isEmpty()) {
+            return
+        }
+
+        val frameSizePx = (iconFrameSizeDp * density).toInt().coerceAtLeast(1)
+        apps.forEach { appInfo ->
+            val iconOverride = getIconOverride?.invoke(appInfo.packageName)
+            val scalePercent = (iconOverride?.scalePercent ?: 100).coerceIn(50, 150)
+            val iconSizePx = ((iconSizeDp * (scalePercent / 100f)) * density).toInt().coerceAtLeast(1)
+
+            val iconKey = iconOverride?.iconUri?.let { "icon-uri:$it:$iconSizePx" }
+                ?: "icon-drawable:${appInfo.packageName}:$iconSizePx"
+            loadRenderedAsset(
+                requestKey = iconKey,
+                renderer = {
+                    if (iconOverride?.iconUri != null) {
+                        decodeUriBitmap(iconOverride.iconUri!!, iconSizePx, iconSizePx)
+                    } else {
+                        renderDrawableBitmap(appInfo.icon, iconSizePx, iconSizePx)
+                    }
+                }
+            )
+
+            iconOverride?.backgroundImageUri?.let { backgroundUri ->
+                val backgroundKey = "bg:$backgroundUri:$frameSizePx"
+                loadRenderedAsset(
+                    requestKey = backgroundKey,
+                    renderer = { decodeUriBitmap(backgroundUri, frameSizePx, frameSizePx) }
+                )
+            }
+        }
+    }
+
+    private fun loadRenderedAsset(
+        requestKey: String,
+        renderer: () -> Bitmap?,
+        onLoaded: ((Bitmap) -> Unit)? = null
+    ) {
+        val cachedBitmap = renderedAssetCache.get(requestKey)
+        if (cachedBitmap != null) {
+            onLoaded?.invoke(cachedBitmap)
+            return
+        }
+
+        val shouldStartLoad = synchronized(pendingAssetLoads) {
+            pendingAssetLoads.add(requestKey)
+        }
+        if (!shouldStartLoad) {
+            return
+        }
+
+        assetExecutor.execute {
+            val bitmap = try {
+                renderer()
+            } catch (_: Exception) {
+                null
+            }
+
+            if (bitmap != null) {
+                renderedAssetCache.put(requestKey, bitmap)
+            }
+
+            mainHandler.post {
+                synchronized(pendingAssetLoads) {
+                    pendingAssetLoads.remove(requestKey)
+                }
+                if (bitmap != null) {
+                    onLoaded?.invoke(bitmap)
+                }
+            }
+        }
+    }
+
+    private fun renderDrawableBitmap(drawable: Drawable, width: Int, height: Int): Bitmap? {
+        val safeWidth = width.coerceAtLeast(1)
+        val safeHeight = height.coerceAtLeast(1)
+        val source = drawable.constantState?.newDrawable(context.resources)?.mutate() ?: drawable
+        val bitmap = Bitmap.createBitmap(safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        source.setBounds(0, 0, safeWidth, safeHeight)
+        source.draw(canvas)
+        return bitmap
+    }
+
+    private fun decodeUriBitmap(uriString: String, targetWidth: Int, targetHeight: Int): Bitmap? {
+        val uri = Uri.parse(uriString)
+        val boundsOptions = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, boundsOptions)
+        } ?: return null
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = calculateInSampleSize(boundsOptions, targetWidth, targetHeight)
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+
+        val decodedBitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+            BitmapFactory.decodeStream(stream, null, decodeOptions)
+        } ?: return null
+
+        if (decodedBitmap.width == targetWidth && decodedBitmap.height == targetHeight) {
+            return decodedBitmap
+        }
+
+        val scaledBitmap = Bitmap.createScaledBitmap(
+            decodedBitmap,
+            targetWidth.coerceAtLeast(1),
+            targetHeight.coerceAtLeast(1),
+            true
+        )
+        if (scaledBitmap !== decodedBitmap) {
+            decodedBitmap.recycle()
+        }
+        return scaledBitmap
+    }
+
+    private fun calculateInSampleSize(
+        options: BitmapFactory.Options,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
+        val height = options.outHeight
+        val width = options.outWidth
+        var inSampleSize = 1
+
+        if (height > reqHeight || width > reqWidth) {
+            var halfHeight = height / 2
+            var halfWidth = width / 2
+
+            while (halfHeight / inSampleSize >= reqHeight &&
+                halfWidth / inSampleSize >= reqWidth
+            ) {
+                inSampleSize *= 2
+            }
+        }
+
+        return inSampleSize.coerceAtLeast(1)
+    }
 
     private fun showContextMenu(appInfo: AppInfo) {
         val density = context.resources.displayMetrics.density
@@ -405,6 +711,7 @@ class AppAdapter(
             onSelectionChanged?.invoke(selectedPackages.size)
         }
         notifyDataSetChanged()
+        preloadRenderedAssets(filteredList)
     }
 
     fun getSelectedApps(): List<AppInfo> {
@@ -468,15 +775,18 @@ class AppAdapter(
     fun setIconSize(sizeDp: Int) {
         iconSizeDp = sizeDp
         notifyDataSetChanged()
+        preloadRenderedAssets(filteredList)
     }
 
     fun setIconFrameSize(sizeDp: Int) {
         iconFrameSizeDp = sizeDp
         notifyDataSetChanged()
+        preloadRenderedAssets(filteredList)
     }
 
     fun setIconShape(shape: String) {
         iconShape = shape
+        outlineProviderCache.clear()
         notifyDataSetChanged()
     }
 
@@ -487,6 +797,7 @@ class AppAdapter(
 
     fun setIconFrameBackgroundColor(color: Int) {
         iconFrameBackgroundColor = color
+        resolvedIconFrameBackgroundColor = ColorSettingUtils.resolveColor(context, color)
         notifyDataSetChanged()
     }
 
@@ -530,6 +841,7 @@ class AppAdapter(
             override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
                 filteredList = results?.values as? List<AppInfo> ?: appList
                 notifyDataSetChanged()
+                preloadRenderedAssets(filteredList)
             }
         }
     }
