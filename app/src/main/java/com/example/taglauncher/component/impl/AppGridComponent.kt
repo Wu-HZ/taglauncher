@@ -93,6 +93,8 @@ class AppGridComponent(
     private lateinit var recyclerView: RecyclerView
     private lateinit var gridAdapter: CustomGridAdapter
     private var containerView: View? = null
+    private var layoutSuppressedForEdit: Boolean = false
+    private var pendingLayoutRefresh: Boolean = false
 
     // Grid data: list of cell configurations
     private var gridCells: MutableList<GridCellConfig> = mutableListOf()
@@ -565,6 +567,7 @@ class AppGridComponent(
                 applyVisualSettings()
             }
         }
+        refreshLayoutForEditMode()
     }
 
     private fun applyVisualSettings() {
@@ -585,12 +588,35 @@ class AppGridComponent(
         }
     }
 
+    private fun refreshLayoutForEditMode() {
+        if (!layoutSuppressedForEdit || pendingLayoutRefresh || !::recyclerView.isInitialized) {
+            return
+        }
+        pendingLayoutRefresh = true
+        recyclerView.suppressLayout(false)
+        recyclerView.post {
+            pendingLayoutRefresh = false
+            if (::gridAdapter.isInitialized) {
+                gridAdapter.notifyDataSetChanged()
+            }
+            recyclerView.requestLayout()
+            recyclerView.invalidate()
+            if (layoutSuppressedForEdit) {
+                recyclerView.suppressLayout(true)
+            }
+        }
+    }
+
     override fun disableInteraction(view: View) {
+        layoutSuppressedForEdit = true
+        pendingLayoutRefresh = false
         recyclerView.suppressLayout(true)
         recyclerView.isNestedScrollingEnabled = false
     }
 
     override fun enableInteraction(view: View) {
+        layoutSuppressedForEdit = false
+        pendingLayoutRefresh = false
         recyclerView.suppressLayout(false)
         recyclerView.isNestedScrollingEnabled = true
     }

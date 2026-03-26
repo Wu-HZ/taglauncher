@@ -45,6 +45,8 @@ class AppDrawerComponent(
     private var selectionAllButton: MaterialButton? = null
     private var selectionTagsButton: MaterialButton? = null
     private var selectionCancelButton: MaterialButton? = null
+    private var layoutSuppressedForEdit: Boolean = false
+    private var pendingLayoutRefresh: Boolean = false
 
     private var allApps: List<AppInfo> = emptyList()
     private var visibleApps: List<AppInfo> = emptyList()
@@ -661,6 +663,7 @@ class AppDrawerComponent(
                 applyVisualSettings()
             }
         }
+        refreshLayoutForEditMode()
     }
 
     private fun applyVisualSettings() {
@@ -738,14 +741,37 @@ class AppDrawerComponent(
         }
     }
 
+    private fun refreshLayoutForEditMode() {
+        if (!layoutSuppressedForEdit || pendingLayoutRefresh || !::recyclerView.isInitialized) {
+            return
+        }
+        pendingLayoutRefresh = true
+        recyclerView.suppressLayout(false)
+        recyclerView.post {
+            pendingLayoutRefresh = false
+            if (::appAdapter.isInitialized) {
+                appAdapter.notifyDataSetChanged()
+            }
+            recyclerView.requestLayout()
+            recyclerView.invalidate()
+            if (layoutSuppressedForEdit) {
+                recyclerView.suppressLayout(true)
+            }
+        }
+    }
+
     override fun disableInteraction(view: View) {
         // Disable RecyclerView scrolling
+        layoutSuppressedForEdit = true
+        pendingLayoutRefresh = false
         recyclerView.suppressLayout(true)
         recyclerView.isNestedScrollingEnabled = false
     }
 
     override fun enableInteraction(view: View) {
         // Re-enable RecyclerView scrolling
+        layoutSuppressedForEdit = false
+        pendingLayoutRefresh = false
         recyclerView.suppressLayout(false)
         recyclerView.isNestedScrollingEnabled = true
     }

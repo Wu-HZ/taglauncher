@@ -27,11 +27,15 @@ class ComponentSettingsDialog(
 ) {
     private val settingsSchema = component.getSettingsSchema()
     private val pendingChanges = mutableMapOf<String, Any>()
+    private val originalSettings = mutableMapOf<String, OriginalSetting>()
+
+    private data class OriginalSetting(val existed: Boolean, val value: Any)
 
     fun show() {
         if (settingsSchema.isEmpty()) {
             return
         }
+        captureOriginalSettings()
 
         val scrollView = ScrollView(context)
         val container = LinearLayout(context).apply {
@@ -45,14 +49,28 @@ class ComponentSettingsDialog(
 
         scrollView.addView(container)
 
-        MaterialAlertDialogBuilder(context)
+        var applied = false
+        val dialog = MaterialAlertDialogBuilder(context)
             .setTitle("${component.componentType.displayName} Settings")
             .setView(scrollView)
             .setPositiveButton("Apply") { _, _ ->
+                applied = true
                 applyChanges()
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        dialog.setOnCancelListener {
+            if (!applied) {
+                restoreOriginalSettings()
+            }
+        }
+        dialog.setOnDismissListener {
+            if (!applied) {
+                restoreOriginalSettings()
+            }
+        }
+        dialog.show()
     }
 
     private fun createSettingView(definition: SettingDefinition): View {
@@ -108,7 +126,9 @@ class ComponentSettingsDialog(
                 override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                     val value = definition.min + (progress * definition.step)
                     valueText.text = value.toString()
-                    pendingChanges[definition.key] = value
+                    if (fromUser) {
+                        applySetting(definition.key, value)
+                    }
                 }
 
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -154,7 +174,7 @@ class ComponentSettingsDialog(
         val switch = SwitchCompat(context).apply {
             isChecked = currentValue
             setOnCheckedChangeListener { _, isChecked ->
-                pendingChanges[definition.key] = isChecked
+                applySetting(definition.key, isChecked)
             }
         }
 
@@ -194,7 +214,7 @@ class ComponentSettingsDialog(
 
             onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    pendingChanges[definition.key] = values[position]
+                    applySetting(definition.key, values[position])
                 }
 
                 override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -273,7 +293,7 @@ class ComponentSettingsDialog(
                 }
                 alpha = if (currentValue == ColorSettingUtils.COLOR_FOLLOW_SYSTEM) 1.0f else 0.4f
                 setOnClickListener {
-                    pendingChanges[definition.key] = ColorSettingUtils.COLOR_FOLLOW_SYSTEM
+                    applySetting(definition.key, ColorSettingUtils.COLOR_FOLLOW_SYSTEM)
                     updateSelection(this)
                 }
             }
@@ -296,7 +316,7 @@ class ComponentSettingsDialog(
                 alpha = if (color == currentValue) 1.0f else 0.4f
 
                 setOnClickListener {
-                    pendingChanges[definition.key] = color
+                    applySetting(definition.key, color)
                     updateSelection(this)
                 }
             }
@@ -339,7 +359,7 @@ class ComponentSettingsDialog(
             addTextChangedListener(object : android.text.TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    pendingChanges[definition.key] = s?.toString() ?: ""
+                    applySetting(definition.key, s?.toString() ?: "")
                 }
                 override fun afterTextChanged(s: android.text.Editable?) {}
             })
@@ -354,9 +374,47 @@ class ComponentSettingsDialog(
 
     private fun applyChanges() {
         pendingChanges.forEach { (key, value) ->
-            component.settings.set(key, value)
-            component.onSettingsChanged(key, value)
+            applySetting(key, value, updatePending = false)
         }
+        onSettingsChanged()
+    }
+
+    private fun applySetting(key: String, value: Any, updatePending: Boolean = true) {
+        if (updatePending) {
+            pendingChanges[key] = value
+        }
+        component.settings.set(key, value)
+        component.onSettingsChanged(key, value)
+        onSettingsChanged()
+    }
+
+    private fun captureOriginalSettings() {
+        if (originalSettings.isNotEmpty()) {
+            return
+        }
+        settingsSchema.forEach { definition ->
+            val existed = component.settings.has(definition.key)
+            val value = when (definition) {
+                is SettingDefinition.IntRange -> component.settings.get(definition.key, definition.default)
+                is SettingDefinition.Toggle -> component.settings.get(definition.key, definition.default)
+                is SettingDefinition.Choice -> component.settings.get(definition.key, definition.default)
+                is SettingDefinition.Color -> component.settings.get(definition.key, definition.default)
+                is SettingDefinition.Text -> component.settings.get(definition.key, definition.default)
+            }
+            originalSettings[definition.key] = OriginalSetting(existed, value)
+        }
+    }
+
+    private fun restoreOriginalSettings() {
+        originalSettings.forEach { (key, original) ->
+            if (original.existed) {
+                component.settings.set(key, original.value)
+            } else {
+                component.settings.remove(key)
+            }
+            component.onSettingsChanged(key, original.value)
+        }
+        pendingChanges.clear()
         onSettingsChanged()
     }
 
