@@ -118,6 +118,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var gestureDetector: GestureDetectorCompat
     private lateinit var scaleGestureDetector: android.view.ScaleGestureDetector
     private var initialPinchSpan = 0f
+    private var swipeDownStartX = 0f
+    private var swipeDownStartY = 0f
+    private var swipeDownStartTime = 0L
+    private var isTrackingSwipeDown = false
+    private var isSwipeDownBlockedByHorizontalMotion = false
+    private var minSwipeDownDistance = 0f
+    private var minSwipeDownFlingDistance = 0f
+    private var minSwipeDownVelocity = 0f
+    private var swipeDownTouchSlop = 0f
 
     private var isTagMenuActive = false
     private var lastSelectedTagId: String? = null
@@ -492,8 +501,11 @@ class MainActivity : AppCompatActivity() {
         val isManagePagesVisible =
             ::managePagesOverlay.isInitialized && managePagesOverlay.visibility == View.VISIBLE
         if (!isGlobalGestureDisabled && !isManagePagesVisible) {
+            trackSwipeDownGesture(event)
             scaleGestureDetector.onTouchEvent(event)
             gestureDetector.onTouchEvent(event)
+        } else {
+            resetSwipeDownTracking()
         }
         // Continue normal event dispatch
         return super.dispatchTouchEvent(event)
@@ -1487,38 +1499,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupGestureDetector() {
-        val minSwipeDistance = dpToPx(140).toFloat()
-        val minVelocity = ViewConfiguration.get(this).scaledMinimumFlingVelocity * 2
+        val viewConfiguration = ViewConfiguration.get(this)
+        minSwipeDownDistance = dpToPx(96).toFloat()
+        minSwipeDownFlingDistance = dpToPx(72).toFloat()
+        minSwipeDownVelocity = viewConfiguration.scaledMinimumFlingVelocity * 1.25f
+        swipeDownTouchSlop = viewConfiguration.scaledTouchSlop.toFloat()
         gestureDetector = GestureDetectorCompat(this, object : GestureDetector.SimpleOnGestureListener() {
-            override fun onFling(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                velocityX: Float,
-                velocityY: Float
-            ): Boolean {
-                if (e1 != null) {
-                    val deltaX = e2.x - e1.x
-                    val deltaY = e2.y - e1.y
-                    val isVerticalDominant = kotlin.math.abs(deltaY) > kotlin.math.abs(deltaX) * 1.5f
-                    val isFastEnough =
-                        kotlin.math.abs(velocityY) > minVelocity &&
-                            kotlin.math.abs(velocityY) > kotlin.math.abs(velocityX) * 1.2f
-                    if (deltaY > minSwipeDistance && isVerticalDominant && isFastEnough) {
-                        handleSwipeDown()
-                        return true
-                    }
-                }
-                return false
-            }
-
-            override fun onScroll(
-                e1: MotionEvent?,
-                e2: MotionEvent,
-                distanceX: Float,
-                distanceY: Float
-            ): Boolean {
-                // Avoid triggering fling-based swipe down when user is clearly paging horizontally.
-                return kotlin.math.abs(distanceX) > kotlin.math.abs(distanceY) * 1.2f
+            override fun onDown(e: MotionEvent): Boolean {
+                return true
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
@@ -1526,6 +1514,75 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         })
+    }
+
+    private fun trackSwipeDownGesture(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                swipeDownStartX = event.rawX
+                swipeDownStartY = event.rawY
+                swipeDownStartTime = event.eventTime
+                isTrackingSwipeDown = true
+                isSwipeDownBlockedByHorizontalMotion = false
+            }
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                resetSwipeDownTracking()
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (!isTrackingSwipeDown || isSwipeDownBlockedByHorizontalMotion) {
+                    return
+                }
+                val deltaX = event.rawX - swipeDownStartX
+                val deltaY = event.rawY - swipeDownStartY
+                if (abs(deltaX) > swipeDownTouchSlop && abs(deltaX) > abs(deltaY) * 1.35f) {
+                    isSwipeDownBlockedByHorizontalMotion = true
+                }
+            }
+
+            MotionEvent.ACTION_UP -> {
+                if (shouldTriggerSwipeDown(event)) {
+                    handleSwipeDown()
+                }
+                resetSwipeDownTracking()
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                resetSwipeDownTracking()
+            }
+        }
+    }
+
+    private fun shouldTriggerSwipeDown(event: MotionEvent): Boolean {
+        if (!isTrackingSwipeDown || isSwipeDownBlockedByHorizontalMotion) {
+            return false
+        }
+
+        val deltaX = event.rawX - swipeDownStartX
+        val deltaY = event.rawY - swipeDownStartY
+        if (deltaY <= 0f) {
+            return false
+        }
+
+        val isVerticalDominant = deltaY > abs(deltaX) * 1.15f
+        if (!isVerticalDominant) {
+            return false
+        }
+
+        if (deltaY >= minSwipeDownDistance) {
+            return true
+        }
+
+        val durationMs = (event.eventTime - swipeDownStartTime).coerceAtLeast(1L)
+        val velocityY = deltaY / durationMs * 1000f
+        return deltaY >= minSwipeDownFlingDistance && velocityY >= minSwipeDownVelocity
+    }
+
+    private fun resetSwipeDownTracking() {
+        isTrackingSwipeDown = false
+        isSwipeDownBlockedByHorizontalMotion = false
+        swipeDownStartTime = 0L
     }
 
     private fun handleSwipeDown() {
