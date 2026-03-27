@@ -496,6 +496,7 @@ class MainActivity : AppCompatActivity() {
         val offsetX = preferencesManager.getTouchpadOffsetX()
         val offsetY = preferencesManager.getTouchpadOffsetY()
         val params = touchpadOverlay.layoutParams as FrameLayout.LayoutParams
+        val touchpadExpansion = dpToPx(24).toFloat()
 
         params.gravity = when (position) {
             PreferencesManager.TAG_POSITION_BOTTOM_RIGHT -> android.view.Gravity.BOTTOM or android.view.Gravity.END
@@ -544,6 +545,20 @@ class MainActivity : AppCompatActivity() {
         }
 
         touchpadOverlay.layoutParams = params
+        touchpadOverlay.translationX = when (position) {
+            PreferencesManager.TAG_POSITION_BOTTOM_RIGHT,
+            PreferencesManager.TAG_POSITION_RIGHT_CENTER -> touchpadExpansion
+            PreferencesManager.TAG_POSITION_BOTTOM_CENTER -> touchpadExpansion / 2f
+            else -> 0f
+        }
+        touchpadOverlay.translationY = when (position) {
+            PreferencesManager.TAG_POSITION_BOTTOM_RIGHT,
+            PreferencesManager.TAG_POSITION_BOTTOM_LEFT,
+            PreferencesManager.TAG_POSITION_BOTTOM_CENTER -> touchpadExpansion
+            PreferencesManager.TAG_POSITION_RIGHT_CENTER,
+            PreferencesManager.TAG_POSITION_LEFT_CENTER -> touchpadExpansion / 2f
+            else -> 0f
+        }
         if (touchpadOverlay.visibility == View.VISIBLE) {
             touchpadOverlay.bringToFront()
         }

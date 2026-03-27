@@ -72,7 +72,7 @@ class FloatingTouchpadView @JvmOverloads constructor(
     private val cancelZoneRect = RectF()
     private val cornerRadius = dpToPx(20f)
     private val cancelZoneSize = dpToPx(52f)
-    private val cancelZoneGap = dpToPx(8f)
+    private val cancelZoneGap = dpToPx(32f)
     private val pointerRadius = dpToPx(10f)
     private val centerDotRadius = dpToPx(3f)
     private var pointerX = 0.5f
@@ -91,33 +91,35 @@ class FloatingTouchpadView @JvmOverloads constructor(
         updateLayoutRects()
         canvas.drawRoundRect(panelRect, cornerRadius, cornerRadius, backgroundPaint)
         canvas.drawRoundRect(panelRect, cornerRadius, cornerRadius, borderPaint)
-        canvas.drawRoundRect(
-            cancelZoneRect,
-            cancelZoneRect.width() / 2f,
-            cancelZoneRect.height() / 2f,
-            if (isPointerInCancelZone) cancelZoneActivePaint else cancelZonePaint
-        )
-        canvas.drawRoundRect(
-            cancelZoneRect,
-            cancelZoneRect.width() / 2f,
-            cancelZoneRect.height() / 2f,
-            cancelZoneBorderPaint
-        )
-        val iconInset = cancelZoneRect.width() * 0.32f
-        canvas.drawLine(
-            cancelZoneRect.left + iconInset,
-            cancelZoneRect.top + iconInset,
-            cancelZoneRect.right - iconInset,
-            cancelZoneRect.bottom - iconInset,
-            cancelIconPaint
-        )
-        canvas.drawLine(
-            cancelZoneRect.right - iconInset,
-            cancelZoneRect.top + iconInset,
-            cancelZoneRect.left + iconInset,
-            cancelZoneRect.bottom - iconInset,
-            cancelIconPaint
-        )
+        if (isTracking) {
+            canvas.drawRoundRect(
+                cancelZoneRect,
+                cancelZoneRect.width() / 2f,
+                cancelZoneRect.height() / 2f,
+                if (isPointerInCancelZone) cancelZoneActivePaint else cancelZonePaint
+            )
+            canvas.drawRoundRect(
+                cancelZoneRect,
+                cancelZoneRect.width() / 2f,
+                cancelZoneRect.height() / 2f,
+                cancelZoneBorderPaint
+            )
+            val iconInset = cancelZoneRect.width() * 0.32f
+            canvas.drawLine(
+                cancelZoneRect.left + iconInset,
+                cancelZoneRect.top + iconInset,
+                cancelZoneRect.right - iconInset,
+                cancelZoneRect.bottom - iconInset,
+                cancelIconPaint
+            )
+            canvas.drawLine(
+                cancelZoneRect.right - iconInset,
+                cancelZoneRect.top + iconInset,
+                cancelZoneRect.left + iconInset,
+                cancelZoneRect.bottom - iconInset,
+                cancelIconPaint
+            )
+        }
 
         val thirdWidth = panelRect.width() / 3f
         val thirdHeight = panelRect.height() / 3f
@@ -140,7 +142,7 @@ class FloatingTouchpadView @JvmOverloads constructor(
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         updateLayoutRects()
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && !isPointInInteractiveArea(event.x, event.y)) {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && !panelRect.contains(event.x, event.y)) {
             return false
         }
         if (!isTracking && event.actionMasked != MotionEvent.ACTION_DOWN) {
@@ -257,7 +259,7 @@ class FloatingTouchpadView @JvmOverloads constructor(
         getLocationOnScreen(location)
         val localX = rawX - location[0]
         val localY = rawY - location[1]
-        return isPointInInteractiveArea(localX, localY)
+        return isPointInInteractiveArea(localX, localY, includeCancelZone = false)
     }
 
     private fun dpToPx(dp: Float): Float {
@@ -269,9 +271,9 @@ class FloatingTouchpadView @JvmOverloads constructor(
         return cancelZoneRect.contains(x, y)
     }
 
-    private fun isPointInInteractiveArea(x: Float, y: Float): Boolean {
+    private fun isPointInInteractiveArea(x: Float, y: Float, includeCancelZone: Boolean = isTracking): Boolean {
         updateLayoutRects()
-        return panelRect.contains(x, y) || cancelZoneRect.contains(x, y)
+        return panelRect.contains(x, y) || (includeCancelZone && cancelZoneRect.contains(x, y))
     }
 
     private fun updateLayoutRects() {
