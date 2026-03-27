@@ -604,6 +604,29 @@ class PreferencesManager(context: Context) {
             .toList()
     }
 
+    fun getAppsWithAllTags(tagIds: List<String>): List<String> {
+        if (tagIds.isEmpty()) return emptyList()
+        return getAppTagAssociations()
+            .filter { association -> tagIds.all { tagId -> association.value.contains(tagId) } }
+            .keys
+            .toList()
+    }
+
+    fun getAvailableTagsForApps(
+        packageNames: Collection<String>,
+        excludedTagIds: Collection<String> = emptyList()
+    ): Set<String> {
+        if (packageNames.isEmpty()) return emptySet()
+        val packageNameSet = packageNames.toSet()
+        val excludedSet = excludedTagIds.toSet()
+        return getAppTagAssociations()
+            .filterKeys { packageNameSet.contains(it) }
+            .values
+            .flatten()
+            .filterNot { excludedSet.contains(it) }
+            .toSet()
+    }
+
     // ==================== Pinned Tag Positions ====================
 
     // Returns map of tagId -> Pair(ringIndex, segmentIndex)

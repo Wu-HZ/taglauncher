@@ -53,7 +53,8 @@ class AppDrawerComponent(
 
     private var allApps: List<AppInfo> = emptyList()
     private var visibleApps: List<AppInfo> = emptyList()
-    private var currentFilterTag: String? = null
+    private var currentFilterTagIds: List<String> = emptyList()
+    private var showHiddenAppsOnly: Boolean = false
     private var allAppsProvider: (() -> List<AppInfo>)? = null
     private val excludedPackages = loadExcludedPackages()
 
@@ -367,18 +368,20 @@ class AppDrawerComponent(
     }
 
     private fun reloadVisibleApps() {
+        val validTagIds = preferencesManager.getAllTags().map { it.id }.toSet()
+        currentFilterTagIds = currentFilterTagIds.filter { validTagIds.contains(it) }
+
         val hiddenApps = preferencesManager.getHiddenApps()
-        val showingHidden = currentFilterTag == MainActivity.HIDDEN_TAG_ID
-        val baseApps = if (showingHidden) {
+        val baseApps = if (showHiddenAppsOnly) {
             allApps.filter { hiddenApps.contains(it.packageName) }
         } else {
             allApps.filter { !hiddenApps.contains(it.packageName) }
         }
 
-        val filteredApps = if (currentFilterTag == null || showingHidden) {
+        val filteredApps = if (currentFilterTagIds.isEmpty()) {
             baseApps
         } else {
-            val taggedPackages = preferencesManager.getAppsWithTag(currentFilterTag!!)
+            val taggedPackages = preferencesManager.getAppsWithAllTags(currentFilterTagIds).toSet()
             baseApps.filter { taggedPackages.contains(it.packageName) }
         }
         visibleApps = if (removeOnTagChange) {
@@ -393,8 +396,22 @@ class AppDrawerComponent(
      * @param tagId The tag ID to filter by, or null to show all apps.
      */
     fun filterByTag(tagId: String?) {
-        currentFilterTag = tagId
-        settings.set("filterTag", tagId ?: "all")
+        when (tagId) {
+            null, MainActivity.ALL_TAG_ID, "all" -> applyTagFilters(emptyList(), false)
+            MainActivity.HIDDEN_TAG_ID -> applyTagFilters(emptyList(), true)
+            else -> applyTagFilters(listOf(tagId), false)
+        }
+    }
+
+    fun applyTagFilters(tagIds: List<String>, showHiddenOnly: Boolean) {
+        currentFilterTagIds = tagIds.distinct()
+        showHiddenAppsOnly = showHiddenOnly
+        val filterTagSetting = when {
+            showHiddenAppsOnly && currentFilterTagIds.isEmpty() -> MainActivity.HIDDEN_TAG_ID
+            currentFilterTagIds.size == 1 -> currentFilterTagIds.first()
+            else -> "all"
+        }
+        settings.set("filterTag", filterTagSetting)
         reloadVisibleApps()
         if (::appAdapter.isInitialized) {
             appAdapter.updateList(visibleApps)
@@ -402,7 +419,7 @@ class AppDrawerComponent(
     }
 
     fun isTagFilterActive(): Boolean {
-        return currentFilterTag != null && currentFilterTag != "all"
+        return currentFilterTagIds.isNotEmpty() || showHiddenAppsOnly
     }
 
     /**
