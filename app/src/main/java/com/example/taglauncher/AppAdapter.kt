@@ -678,9 +678,10 @@ class AppAdapter(
 
     private fun getLocalizedLabel(packageName: String, locale: Locale): String? {
         return try {
+            val pkg = AppKey.pkgOf(packageName)
             val pm = context.packageManager
-            val appInfo = pm.getApplicationInfo(packageName, 0)
-            val baseContext = context.createPackageContext(packageName, 0)
+            val appInfo = pm.getApplicationInfo(pkg, 0)
+            val baseContext = context.createPackageContext(pkg, 0)
             val config = Configuration(baseContext.resources.configuration)
             config.setLocale(locale)
             val localizedContext = baseContext.createConfigurationContext(config)
@@ -695,16 +696,18 @@ class AppAdapter(
     }
 
     private fun openAppInfo(packageName: String) {
+        val pkg = AppKey.pkgOf(packageName)
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.parse("package:$packageName")
+            data = Uri.parse("package:$pkg")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
     }
 
     private fun uninstallApp(packageName: String) {
+        val pkg = AppKey.pkgOf(packageName)
         val intent = Intent(Intent.ACTION_DELETE).apply {
-            data = Uri.parse("package:$packageName")
+            data = Uri.parse("package:$pkg")
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

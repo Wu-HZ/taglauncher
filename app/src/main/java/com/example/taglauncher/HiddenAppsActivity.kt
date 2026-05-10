@@ -1,7 +1,5 @@
 package com.example.taglauncher
 
-import android.content.Intent
-import android.content.pm.ResolveInfo
 import android.os.Bundle
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
@@ -54,24 +52,7 @@ class HiddenAppsActivity : AppCompatActivity() {
         recyclerView.adapter = adapter
     }
 
-    private fun loadAllApps(): List<AppInfo> {
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-
-        val resolveInfoList: List<ResolveInfo> = packageManager.queryIntentActivities(intent, 0)
-
-        return resolveInfoList
-            .filter { it.activityInfo.packageName != packageName }
-            .map { resolveInfo ->
-                AppInfo(
-                    label = resolveInfo.loadLabel(packageManager).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = resolveInfo.loadIcon(packageManager)
-                )
-            }
-            .sortedBy { it.label.lowercase() }
-    }
+    private fun loadAllApps(): List<AppInfo> = AppLoader.loadAllApps(this)
 
     private fun setupEdgeToEdge() {
         WindowCompat.setDecorFitsSystemWindows(window, false)

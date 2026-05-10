@@ -56,6 +56,14 @@ class PreferencesManager(context: Context) {
         private const val KEY_APP_TAG_ASSOCIATIONS = "app_tag_associations"
         private const val KEY_PINNED_TAG_POSITIONS = "pinned_tag_positions"
 
+        // Workspace (managed profile) auto-tagging
+        private const val KEY_WORKSPACE_TAG_INDEX = "workspace_tag_index"
+        private const val KEY_WORKSPACE_TAG_IDS = "workspace_tag_ids"
+        private const val KEY_AUTO_TAGGED_APPS = "auto_tagged_apps"
+
+        // Default color for workspace tag (Material blue)
+        private const val WORKSPACE_TAG_COLOR = 0xFF2196F3.toInt()
+
         // Defaults
         const val DEFAULT_GRID_COLUMNS = 4
         const val DEFAULT_MAX_DOCK_APPS = 5
@@ -587,6 +595,13 @@ class PreferencesManager(context: Context) {
             uninstalledDescriptions.forEach { descriptions.remove(it) }
             saveAppDescriptions(descriptions)
         }
+
+        val autoTagged = getAutoTaggedApps().toMutableSet()
+        val staleAutoTagged = autoTagged.filter { !installedPackages.contains(it) }
+        if (staleAutoTagged.isNotEmpty()) {
+            autoTagged.removeAll(staleAutoTagged.toSet())
+            setAutoTaggedApps(autoTagged)
+        }
     }
 
     fun getAppsWithTag(tagId: String): List<String> {
@@ -625,6 +640,115 @@ class PreferencesManager(context: Context) {
             .flatten()
             .filterNot { excludedSet.contains(it) }
             .toSet()
+    }
+
+    // ==================== Workspace Auto-Tag ====================
+
+    fun getAutoTaggedApps(): Set<String> {
+        return prefs.getStringSet(KEY_AUTO_TAGGED_APPS, emptySet()) ?: emptySet()
+    }
+
+    private fun setAutoTaggedApps(apps: Set<String>) {
+        prefs.edit().putStringSet(KEY_AUTO_TAGGED_APPS, apps).apply()
+    }
+
+    fun isAutoTagged(appKey: String): Boolean {
+        return getAutoTaggedApps().contains(appKey)
+    }
+
+    fun markAutoTagged(appKey: String) {
+        val current = getAutoTaggedApps().toMutableSet()
+        if (current.add(appKey)) {
+            setAutoTaggedApps(current)
+        }
+    }
+
+    private fun getWorkspaceSerialIndexMap(): MutableMap<Long, Int> {
+        val json = prefs.getString(KEY_WORKSPACE_TAG_INDEX, "{}") ?: "{}"
+        return try {
+            val obj = JSONObject(json)
+            val result = mutableMapOf<Long, Int>()
+            obj.keys().forEach { key ->
+                val serial = key.toLongOrNull() ?: return@forEach
+                result[serial] = obj.getInt(key)
+            }
+            result
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveWorkspaceSerialIndexMap(map: Map<Long, Int>) {
+        val obj = JSONObject()
+        map.forEach { (serial, index) -> obj.put(serial.toString(), index) }
+        prefs.edit().putString(KEY_WORKSPACE_TAG_INDEX, obj.toString()).apply()
+    }
+
+    private fun getWorkspaceTagIdMap(): MutableMap<Int, String> {
+        val json = prefs.getString(KEY_WORKSPACE_TAG_IDS, "{}") ?: "{}"
+        return try {
+            val obj = JSONObject(json)
+            val result = mutableMapOf<Int, String>()
+            obj.keys().forEach { key ->
+                val index = key.toIntOrNull() ?: return@forEach
+                result[index] = obj.getString(key)
+            }
+            result
+        } catch (e: Exception) {
+            mutableMapOf()
+        }
+    }
+
+    private fun saveWorkspaceTagIdMap(map: Map<Int, String>) {
+        val obj = JSONObject()
+        map.forEach { (index, id) -> obj.put(index.toString(), id) }
+        prefs.edit().putString(KEY_WORKSPACE_TAG_IDS, obj.toString()).apply()
+    }
+
+    /**
+     * Returns the tag for the given workspace user serial, creating it if needed.
+     * Returns null if no slot is available (tag limit reached).
+     */
+    fun getOrCreateWorkspaceTag(userSerial: Long): TagItem? {
+        if (userSerial == 0L) return null
+
+        val serialIndexMap = getWorkspaceSerialIndexMap()
+        val tagIdMap = getWorkspaceTagIdMap()
+
+        var index = serialIndexMap[userSerial]
+        if (index == null) {
+            index = (serialIndexMap.values.maxOrNull() ?: 0) + 1
+            serialIndexMap[userSerial] = index
+            saveWorkspaceSerialIndexMap(serialIndexMap)
+        }
+
+        val existingId = tagIdMap[index]
+        if (existingId != null) {
+            val existing = getTagById(existingId)
+            if (existing != null) return existing
+            // Tag was deleted by user — recreate below
+        }
+
+        val tags = getAllTags()
+        val label = if (index == 1) "工作空间" else "工作空间$index"
+        val labelMatch = tags.find { it.label == label }
+        if (labelMatch != null) {
+            tagIdMap[index] = labelMatch.id
+            saveWorkspaceTagIdMap(tagIdMap)
+            return labelMatch
+        }
+
+        if (tags.size >= MAX_TAGS) return null
+
+        val newTag = TagItem(
+            id = "tag_workspace_${userSerial}_${System.currentTimeMillis()}",
+            label = label,
+            color = WORKSPACE_TAG_COLOR
+        )
+        if (!addTag(newTag)) return null
+        tagIdMap[index] = newTag.id
+        saveWorkspaceTagIdMap(tagIdMap)
+        return newTag
     }
 
     // ==================== Pinned Tag Positions ====================

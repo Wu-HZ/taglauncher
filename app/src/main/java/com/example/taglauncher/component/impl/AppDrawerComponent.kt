@@ -1,7 +1,6 @@
 package com.example.taglauncher.component.impl
 
 import android.content.Context
-import android.content.Intent
 import android.graphics.Color
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
@@ -15,6 +14,7 @@ import com.google.android.material.card.MaterialCardView
 import com.example.taglauncher.AppAdapter
 import com.example.taglauncher.AppIconEditContext
 import com.example.taglauncher.AppInfo
+import com.example.taglauncher.AppLoader
 import com.example.taglauncher.GridSpacingItemDecoration
 import com.example.taglauncher.MainActivity
 import com.example.taglauncher.PreferencesManager
@@ -349,22 +349,7 @@ class AppDrawerComponent(
     }
 
     private fun loadAppsFromPackageManager(): List<AppInfo> {
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
-
-        val resolveInfoList = context.packageManager.queryIntentActivities(intent, 0)
-
-        return resolveInfoList
-            .filter { it.activityInfo.packageName != context.packageName }
-            .map { resolveInfo ->
-                AppInfo(
-                    label = resolveInfo.loadLabel(context.packageManager).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = resolveInfo.loadIcon(context.packageManager)
-                )
-            }
-            .sortedBy { it.label.lowercase() }
+        return AppLoader.loadAllApps(context)
     }
 
     private fun reloadVisibleApps() {

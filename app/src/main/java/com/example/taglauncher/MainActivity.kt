@@ -4,12 +4,15 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.LauncherApps
 import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.UserHandle
+import android.os.UserManager
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.GestureDetector
@@ -116,6 +119,7 @@ class MainActivity : AppCompatActivity() {
     private var allApps: List<AppInfo> = emptyList()
     private var visibleApps: List<AppInfo> = emptyList()
     private var appChangeReceiver: AppChangeReceiver? = null
+    private var launcherAppsCallback: LauncherApps.Callback? = null
 
     private lateinit var gestureDetector: GestureDetectorCompat
     private lateinit var scaleGestureDetector: android.view.ScaleGestureDetector
@@ -2031,27 +2035,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadApps() {
-        val intent = Intent(Intent.ACTION_MAIN, null).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-        }
+        allApps = AppLoader.loadAllApps(this)
 
-        val resolveInfoList: List<ResolveInfo> = packageManager.queryIntentActivities(intent, 0)
+        val installedKeys = allApps.map { it.packageName }.toSet()
+        preferencesManager.cleanupUninstalledApps(installedKeys)
 
-        allApps = resolveInfoList
-            .filter { it.activityInfo.packageName != packageName }
-            .map { resolveInfo ->
-                AppInfo(
-                    label = resolveInfo.loadLabel(packageManager).toString(),
-                    packageName = resolveInfo.activityInfo.packageName,
-                    icon = resolveInfo.loadIcon(packageManager)
-                )
-            }
-            .sortedBy { it.label.lowercase() }
-
-        val installedPackages = allApps.map { it.packageName }.toSet()
-        preferencesManager.cleanupUninstalledApps(installedPackages)
+        autoTagWorkspaceApps(allApps)
 
         reloadVisibleApps()
+    }
+
+    private fun autoTagWorkspaceApps(apps: List<AppInfo>) {
+        val workApps = apps.filter { AppKey.isWorkApp(it.packageName) }
+        if (workApps.isEmpty()) return
+
+        var tagsChanged = false
+        for (app in workApps) {
+            if (preferencesManager.isAutoTagged(app.packageName)) continue
+            val serial = AppKey.serialOf(app.packageName)
+            val tag = preferencesManager.getOrCreateWorkspaceTag(serial) ?: continue
+            val current = preferencesManager.getTagsForApp(app.packageName).toMutableList()
+            if (!current.contains(tag.id)) {
+                current.add(tag.id)
+                preferencesManager.setTagsForApp(app.packageName, current)
+                tagsChanged = true
+            }
+            preferencesManager.markAutoTagged(app.packageName)
+        }
+
+        if (tagsChanged && ::tagRingMenu.isInitialized) {
+            updateTagRingMenu()
+        }
     }
 
     private fun reloadVisibleApps() {
@@ -2984,9 +2998,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchApp(packageName: String) {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
-        intent?.let {
-            startActivity(it)
+        val pkg = AppKey.pkgOf(packageName)
+        val serial = AppKey.serialOf(packageName)
+        if (serial == 0L) {
+            val intent = packageManager.getLaunchIntentForPackage(pkg)
+            intent?.let { startActivity(it) }
+            return
+        }
+        try {
+            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+            val userManager = getSystemService(Context.USER_SERVICE) as UserManager
+            val user: UserHandle? = userManager.userProfiles.firstOrNull {
+                userManager.getSerialNumberForUser(it) == serial
+            }
+            if (user == null) return
+            val activity = launcherApps.getActivityList(pkg, user).firstOrNull() ?: return
+            launcherApps.startMainActivity(activity.componentName, user, null, null)
+        } catch (_: Exception) {
+            // Profile may have been removed or be unavailable.
         }
     }
 
@@ -3010,6 +3039,35 @@ class MainActivity : AppCompatActivity() {
         } else {
             registerReceiver(appChangeReceiver, filter)
         }
+
+        registerLauncherAppsCallback()
+    }
+
+    private fun registerLauncherAppsCallback() {
+        val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps ?: return
+        val onChange = {
+            runOnUiThread {
+                loadApps()
+                refreshComponents()
+            }
+        }
+        val callback = object : LauncherApps.Callback() {
+            override fun onPackageAdded(packageName: String?, user: UserHandle?) { onChange() }
+            override fun onPackageRemoved(packageName: String?, user: UserHandle?) { onChange() }
+            override fun onPackageChanged(packageName: String?, user: UserHandle?) { onChange() }
+            override fun onPackagesAvailable(
+                packageNames: Array<out String>?,
+                user: UserHandle?,
+                replacing: Boolean
+            ) { onChange() }
+            override fun onPackagesUnavailable(
+                packageNames: Array<out String>?,
+                user: UserHandle?,
+                replacing: Boolean
+            ) { onChange() }
+        }
+        launcherApps.registerCallback(callback)
+        launcherAppsCallback = callback
     }
 
     override fun onDestroy() {
@@ -3017,6 +3075,14 @@ class MainActivity : AppCompatActivity() {
         appChangeReceiver?.let {
             unregisterReceiver(it)
         }
+        launcherAppsCallback?.let { cb ->
+            try {
+                val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+                launcherApps?.unregisterCallback(cb)
+            } catch (_: Exception) {
+            }
+        }
+        launcherAppsCallback = null
     }
 
     private fun setupEdgeToEdge() {
