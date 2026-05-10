@@ -31,7 +31,10 @@ class TagRingMenuView @JvmOverloads constructor(
         val isRibbon: Boolean = false  // True for action ribbon ring
     )
 
-    private var rings: List<RingConfig> = emptyList()
+    private var pages: List<List<RingConfig>> = listOf(emptyList())
+    private var currentPage: Int = 0
+    private val rings: List<RingConfig> get() = pages.getOrNull(currentPage) ?: emptyList()
+    private var availableSwapZones: Set<Int> = emptySet()  // 0=upper-back, 1=lower-back
     private var centerX = 0f
     private var centerY = 0f
     private var maxRadius = 0f
@@ -47,7 +50,7 @@ class TagRingMenuView @JvmOverloads constructor(
     private var animator: ValueAnimator? = null
 
     private var showPinIndicators = false
-    private var pinnedPositions: Set<Pair<Int, Int>> = emptySet()
+    private var pinnedPositions: Set<Triple<Int, Int, Int>> = emptySet()
     private var allowEmptySelection = false
 
     var onTagSelected: ((TagItem?, Boolean, Int, Int) -> Unit)? = null  // tag, isRibbon, ringIndex, segmentIndex
@@ -106,12 +109,68 @@ class TagRingMenuView @JvmOverloads constructor(
         color = Color.argb(200, 0, 0, 0)
     }
 
+    private val swapZoneArrowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        color = Color.WHITE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+
     private val path = Path()
     private val rectF = RectF()
 
-    fun setRings(ringConfigs: List<RingConfig>) {
-        rings = ringConfigs
+    fun setPages(pageList: List<List<RingConfig>>) {
+        pages = if (pageList.isEmpty()) listOf(emptyList()) else pageList
+        if (currentPage >= pages.size) currentPage = 0
         invalidate()
+    }
+
+    fun setRings(ringConfigs: List<RingConfig>) {
+        setPages(listOf(ringConfigs))
+    }
+
+    fun setCurrentPage(page: Int) {
+        val clamped = page.coerceIn(0, pages.size - 1)
+        if (clamped != currentPage) {
+            currentPage = clamped
+            selectedRingIndex = -1
+            selectedSegmentIndex = -1
+            invalidate()
+        }
+    }
+
+    fun getCurrentPage(): Int = currentPage
+
+    fun setAvailableSwapZones(zones: Set<Int>) {
+        availableSwapZones = zones
+        invalidate()
+    }
+
+    /**
+     * Returns 0 for upper-back zone, 1 for lower-back zone, or -1 if not in any
+     * available swap zone.
+     */
+    fun getSwapZoneAt(x: Float, y: Float): Int {
+        if (animationProgress <= 0f) return -1
+        val dx = x - centerX
+        val dy = y - centerY
+        val distance = sqrt(dx.pow(2) + dy.pow(2))
+        // Require the touch to be at least near the rings (not directly on the FAB).
+        val innerEnter = maxRadius * (rings.firstOrNull()?.innerRadiusRatio ?: 0.1f) * animationProgress
+        if (distance < innerEnter) return -1
+
+        var angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+        if (angle < 0) angle += 360f
+
+        // Inside the front arc → not a swap zone.
+        val endAngle = arcStartAngle + arcSweepAngle
+        val normalizedAngle = if (angle < arcStartAngle) angle + 360 else angle
+        if (normalizedAngle in arcStartAngle..endAngle) return -1
+
+        // Upper half of circle: angle ∈ (180, 360); lower half: (0, 180).
+        val zone = if (angle in 180f..360f) 0 else 1
+        return if (availableSwapZones.contains(zone)) zone else -1
     }
 
     fun setCenter(x: Float, y: Float) {
@@ -142,7 +201,7 @@ class TagRingMenuView @JvmOverloads constructor(
         invalidate()
     }
 
-    fun setPinnedPositions(positions: Set<Pair<Int, Int>>) {
+    fun setPinnedPositions(positions: Set<Triple<Int, Int, Int>>) {
         pinnedPositions = positions
         invalidate()
     }
@@ -280,6 +339,35 @@ class TagRingMenuView @JvmOverloads constructor(
         for ((ringIndex, ring) in rings.withIndex().reversed()) {
             drawRing(canvas, ringIndex, ring)
         }
+
+        drawSwapZoneIndicators(canvas)
+    }
+
+    private fun drawSwapZoneIndicators(canvas: Canvas) {
+        if (availableSwapZones.isEmpty()) return
+        val arrowRadius = maxRadius * 0.45f * animationProgress
+        val arrowSize = maxRadius * 0.06f * animationProgress
+        // Shift along x so the chevron isn't stacked directly above/below the FAB.
+        val xShift = maxRadius * 0.08f * animationProgress * when {
+            arcStartAngle > 0f && arcStartAngle < 180f -> 1f   // back on the right
+            arcStartAngle < 0f || arcStartAngle > 180f -> -1f  // back on the left
+            else -> 0f
+        }
+        for (zone in availableSwapZones) {
+            // zone 0 = upper, zone 1 = lower.
+            val cx = centerX + xShift
+            val cy = if (zone == 0) centerY - arrowRadius else centerY + arrowRadius
+            // Mapping: zone 0 → page 1, zone 1 → page 2.
+            val isActivePage = currentPage == zone + 1
+            val baseAlpha = if (isActivePage) 230 else 110
+            swapZoneArrowPaint.alpha = (baseAlpha * animationProgress).toInt().coerceIn(0, 255)
+
+            // Chevron points OUTWARD: zone 0 points up, zone 1 points down.
+            val tipY = if (zone == 0) cy - arrowSize else cy + arrowSize
+            val baseY = if (zone == 0) cy + arrowSize else cy - arrowSize
+            canvas.drawLine(cx - arrowSize, baseY, cx, tipY, swapZoneArrowPaint)
+            canvas.drawLine(cx + arrowSize, baseY, cx, tipY, swapZoneArrowPaint)
+        }
     }
 
     private fun drawShadowArc(canvas: Canvas) {
@@ -389,7 +477,7 @@ class TagRingMenuView @JvmOverloads constructor(
                     canvas.drawText(tag.label, textX, textY, textPaint)
 
                     // Draw pin indicator if in pin mode and this position is pinned
-                    if (showPinIndicators && pinnedPositions.contains(Pair(ringIndex, segmentIndex))) {
+                    if (showPinIndicators && pinnedPositions.contains(Triple(currentPage, ringIndex, segmentIndex))) {
                         val pinRadius = maxRadius * 0.025f * animationProgress
                         val pinDistance = outerRadius - pinRadius * 1.5f
                         val pinX = centerX + (pinDistance * cos(midAngle)).toFloat()

@@ -783,84 +783,115 @@ class PreferencesManager(context: Context) {
 
     // ==================== Pinned Tag Positions ====================
 
-    // Returns map of tagId -> Pair(ringIndex, segmentIndex)
-    fun getPinnedTagPositions(): Map<String, Pair<Int, Int>> {
+    data class PinEntry(val tagId: String, val page: Int, val ringIndex: Int, val segmentIndex: Int)
+
+    fun getAllPins(): List<PinEntry> {
         val json = prefs.getString(KEY_PINNED_TAG_POSITIONS, "{}") ?: "{}"
-        return try {
+        val result = mutableListOf<PinEntry>()
+        try {
             val jsonObject = JSONObject(json)
-            val result = mutableMapOf<String, Pair<Int, Int>>()
             jsonObject.keys().forEach { tagId ->
-                val posStr = jsonObject.getString(tagId)
-                val parts = posStr.split("_")
-                if (parts.size == 2) {
-                    val ringIndex = parts[0].toIntOrNull()
-                    val segmentIndex = parts[1].toIntOrNull()
-                    if (ringIndex != null && segmentIndex != null) {
-                        result[tagId] = Pair(ringIndex, segmentIndex)
+                when (val raw = jsonObject.opt(tagId)) {
+                    is org.json.JSONArray -> {
+                        for (i in 0 until raw.length()) {
+                            parsePosition(raw.optString(i))?.let { (p, r, s) ->
+                                result.add(PinEntry(tagId, p, r, s))
+                            }
+                        }
+                    }
+                    is String -> {
+                        parsePosition(raw)?.let { (p, r, s) ->
+                            result.add(PinEntry(tagId, p, r, s))
+                        }
                     }
                 }
             }
-            result
-        } catch (e: Exception) {
-            emptyMap()
+        } catch (_: Exception) {
+        }
+        return result
+    }
+
+    private fun parsePosition(posStr: String): Triple<Int, Int, Int>? {
+        val parts = posStr.split("_")
+        return when (parts.size) {
+            2 -> {
+                val r = parts[0].toIntOrNull() ?: return null
+                val s = parts[1].toIntOrNull() ?: return null
+                Triple(0, r, s)
+            }
+            3 -> {
+                val p = parts[0].toIntOrNull() ?: return null
+                val r = parts[1].toIntOrNull() ?: return null
+                val s = parts[2].toIntOrNull() ?: return null
+                Triple(p, r, s)
+            }
+            else -> null
         }
     }
 
-    private fun savePinnedTagPositions(positions: Map<String, Pair<Int, Int>>) {
+    private fun saveAllPins(pins: List<PinEntry>) {
         val jsonObject = JSONObject()
-        positions.forEach { (tagId, pos) ->
-            jsonObject.put(tagId, "${pos.first}_${pos.second}")
+        val byTag = pins.groupBy { it.tagId }
+        byTag.forEach { (tagId, list) ->
+            if (list.isEmpty()) return@forEach
+            val arr = org.json.JSONArray()
+            list.forEach { arr.put("${it.page}_${it.ringIndex}_${it.segmentIndex}") }
+            jsonObject.put(tagId, arr)
         }
         prefs.edit().putString(KEY_PINNED_TAG_POSITIONS, jsonObject.toString()).apply()
     }
 
-    fun setPinnedTagPosition(tagId: String, ringIndex: Int, segmentIndex: Int) {
-        val positions = getPinnedTagPositions().toMutableMap()
-        // Remove any existing pin at this position (only one tag per position)
-        positions.entries.removeAll { it.value == Pair(ringIndex, segmentIndex) }
-        positions[tagId] = Pair(ringIndex, segmentIndex)
-        savePinnedTagPositions(positions)
+    fun setPinnedTagPosition(tagId: String, page: Int, ringIndex: Int, segmentIndex: Int) {
+        val pins = getAllPins().toMutableList()
+        // Remove anyone already at this exact slot.
+        pins.removeAll { it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex }
+        // Avoid duplicate of same tag at same position.
+        if (pins.none { it.tagId == tagId && it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex }) {
+            pins.add(PinEntry(tagId, page, ringIndex, segmentIndex))
+        }
+        saveAllPins(pins)
     }
 
-    fun removePinnedTagPosition(tagId: String) {
-        val positions = getPinnedTagPositions().toMutableMap()
-        positions.remove(tagId)
-        savePinnedTagPositions(positions)
+    fun removePinnedTagPosition(tagId: String, page: Int, ringIndex: Int, segmentIndex: Int) {
+        val pins = getAllPins().toMutableList()
+        pins.removeAll {
+            it.tagId == tagId && it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex
+        }
+        saveAllPins(pins)
     }
 
-    fun togglePinnedTagPosition(tagId: String, ringIndex: Int, segmentIndex: Int): Boolean {
-        val positions = getPinnedTagPositions().toMutableMap()
-        val currentPos = positions[tagId]
-        return if (currentPos == Pair(ringIndex, segmentIndex)) {
-            // Already pinned here, unpin it
-            positions.remove(tagId)
-            savePinnedTagPositions(positions)
+    fun togglePinnedTagPosition(tagId: String, page: Int, ringIndex: Int, segmentIndex: Int): Boolean {
+        val pins = getAllPins().toMutableList()
+        val existing = pins.firstOrNull {
+            it.tagId == tagId && it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex
+        }
+        return if (existing != null) {
+            pins.remove(existing)
+            saveAllPins(pins)
             false
         } else {
-            // Pin it (remove any other tag at this position first)
-            positions.entries.removeAll { it.value == Pair(ringIndex, segmentIndex) }
-            positions[tagId] = Pair(ringIndex, segmentIndex)
-            savePinnedTagPositions(positions)
+            pins.removeAll { it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex }
+            pins.add(PinEntry(tagId, page, ringIndex, segmentIndex))
+            saveAllPins(pins)
             true
         }
     }
 
-    fun getTagIdAtPinnedPosition(ringIndex: Int, segmentIndex: Int): String? {
-        return getPinnedTagPositions().entries.find {
-            it.value == Pair(ringIndex, segmentIndex)
-        }?.key
+    fun getTagIdAtPinnedPosition(page: Int, ringIndex: Int, segmentIndex: Int): String? {
+        return getAllPins().firstOrNull {
+            it.page == page && it.ringIndex == ringIndex && it.segmentIndex == segmentIndex
+        }?.tagId
     }
 
     fun isTagPinned(tagId: String): Boolean {
-        return getPinnedTagPositions().containsKey(tagId)
+        return getAllPins().any { it.tagId == tagId }
     }
 
     fun cleanupInvalidPins(validTagIds: Set<String>) {
-        val positions = getPinnedTagPositions().toMutableMap()
-        val invalidKeys = positions.keys.filter { !validTagIds.contains(it) }
-        if (invalidKeys.isNotEmpty()) {
-            invalidKeys.forEach { positions.remove(it) }
-            savePinnedTagPositions(positions)
+        val pins = getAllPins()
+        val filtered = pins.filter { validTagIds.contains(it.tagId) }
+        if (filtered.size != pins.size) {
+            saveAllPins(filtered)
         }
     }
 

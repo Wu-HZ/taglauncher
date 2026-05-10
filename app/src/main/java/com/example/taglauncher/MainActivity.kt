@@ -1264,12 +1264,13 @@ class MainActivity : AppCompatActivity() {
         updateTagRingMenu()
 
         tagRingMenu.onTagSelected = { tag, isRibbon, ringIndex, segmentIndex ->
+            val currentPage = tagRingMenu.getCurrentPage()
             if (tag != null) {
                 if (isRibbon) {
                     restoreMenuOpenTagFilters()
                     handleRibbonAction(tag)
                 } else if (currentRibbonAction != null) {
-                    applyRibbonActionToTag(tag, ringIndex, segmentIndex)
+                    applyRibbonActionToTag(tag, currentPage, ringIndex, segmentIndex)
                 } else {
                     val baseSnapshot = menuOpenTagFilterSnapshot ?: captureCurrentTagFilterSnapshot()
                     applyTagFilterSnapshot(buildTagFilterSnapshot(baseSnapshot, tag))
@@ -1279,7 +1280,7 @@ class MainActivity : AppCompatActivity() {
                 if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
                     ringIndex >= 0 && segmentIndex >= 0
                 ) {
-                    showPinTagDialog(ringIndex, segmentIndex)
+                    showPinTagDialog(currentPage, ringIndex, segmentIndex)
                 } else if (currentRibbonAction == null) {
                     restoreMenuOpenTagFilters()
                     closeTagMenu()
@@ -1305,6 +1306,20 @@ class MainActivity : AppCompatActivity() {
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (isTagMenuActive) {
+                        val swapZone = tagRingMenu.getSwapZoneAt(windowX, windowY)
+                        if (swapZone >= 0) {
+                            val targetPage = swapZone + 1
+                            if (tagRingMenu.getCurrentPage() != targetPage) {
+                                tagRingMenu.setCurrentPage(targetPage)
+                                lastSelectedTagId = null
+                                if (currentRibbonAction == null && !menuPreviewIsRestored) {
+                                    restoreMenuOpenTagFilters()
+                                    menuPreviewIsRestored = true
+                                }
+                            }
+                            return@setOnTouchListener true
+                        }
+
                         tagRingMenu.updateSelectionAt(windowX, windowY)
                         val selectedTag = tagRingMenu.getSelectedTag()
                         val isRibbon = tagRingMenu.isSelectedFromRibbon()
@@ -1328,18 +1343,30 @@ class MainActivity : AppCompatActivity() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (isTagMenuActive) {
+                        val swapZone = tagRingMenu.getSwapZoneAt(windowX, windowY)
+                        if (swapZone >= 0) {
+                            // Released in a swap zone — treat as cancel: keep current page
+                            // for next session but revert filter to pre-menu state.
+                            if (currentRibbonAction == null) {
+                                restoreMenuOpenTagFilters()
+                            }
+                            closeTagMenu()
+                            return@setOnTouchListener true
+                        }
+
                         tagRingMenu.updateSelectionAt(windowX, windowY)
                         val selectedTag = tagRingMenu.getSelectedTag()
                         val isRibbon = tagRingMenu.isSelectedFromRibbon()
                         val ringIndex = tagRingMenu.getSelectedRingIndex()
                         val segmentIndex = tagRingMenu.getSelectedSegmentIndex()
+                        val currentPage = tagRingMenu.getCurrentPage()
 
                         if (selectedTag != null) {
                             if (isRibbon) {
                                 restoreMenuOpenTagFilters()
                                 handleRibbonAction(selectedTag)
                             } else if (currentRibbonAction != null) {
-                                applyRibbonActionToTag(selectedTag, ringIndex, segmentIndex)
+                                applyRibbonActionToTag(selectedTag, currentPage, ringIndex, segmentIndex)
                             } else {
                                 val baseSnapshot = menuOpenTagFilterSnapshot ?: captureCurrentTagFilterSnapshot()
                                 applyTagFilterSnapshot(buildTagFilterSnapshot(baseSnapshot, selectedTag))
@@ -1349,7 +1376,7 @@ class MainActivity : AppCompatActivity() {
                             if (currentRibbonAction == RIBBON_ACTION_PIN_TAG && !isRibbon &&
                                 ringIndex >= 0 && segmentIndex >= 0
                             ) {
-                                showPinTagDialog(ringIndex, segmentIndex)
+                                showPinTagDialog(currentPage, ringIndex, segmentIndex)
                             } else if (currentRibbonAction == null) {
                                 if (onFab) {
                                     clearTagFilter()
@@ -1421,11 +1448,11 @@ class MainActivity : AppCompatActivity() {
         updateTouchpadOverlayState()
     }
 
-    private fun applyRibbonActionToTag(tag: TagItem, ringIndex: Int, segmentIndex: Int) {
+    private fun applyRibbonActionToTag(tag: TagItem, pageIndex: Int, ringIndex: Int, segmentIndex: Int) {
         when (currentRibbonAction) {
             RIBBON_ACTION_EDIT_TAG -> showEditTagDialog(tag)
             RIBBON_ACTION_EDIT_APPS -> showEditAppsForTagDialog(tag)
-            RIBBON_ACTION_PIN_TAG -> showPinTagDialog(ringIndex, segmentIndex)
+            RIBBON_ACTION_PIN_TAG -> showPinTagDialog(pageIndex, ringIndex, segmentIndex)
         }
     }
 
@@ -1552,10 +1579,10 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showPinTagDialog(ringIndex: Int, segmentIndex: Int) {
+    private fun showPinTagDialog(pageIndex: Int, ringIndex: Int, segmentIndex: Int) {
         val allTags = preferencesManager.getAllTags()
-        val pinnedPositions = preferencesManager.getPinnedTagPositions()
-        val currentPinnedTagId = preferencesManager.getTagIdAtPinnedPosition(ringIndex, segmentIndex)
+        val allPins = preferencesManager.getAllPins()
+        val currentPinnedTagId = preferencesManager.getTagIdAtPinnedPosition(pageIndex, ringIndex, segmentIndex)
         val pinTags = allTags.toMutableList()
 
         val tagLabels = mutableListOf<String>()
@@ -1568,10 +1595,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         pinTags.forEach { tag ->
-            val isPinned = pinnedPositions.containsKey(tag.id)
-            val pinnedPos = pinnedPositions[tag.id]
-            val label = if (isPinned && pinnedPos != null) {
-                "${tag.label} (pinned at Ring ${pinnedPos.first + 1}, Slot ${pinnedPos.second + 1})"
+            val tagPins = allPins.filter { it.tagId == tag.id }
+            val label = if (tagPins.isNotEmpty()) {
+                val locations = tagPins.joinToString(", ") {
+                    "P${it.page + 1}/R${it.ringIndex + 1}/S${it.segmentIndex + 1}"
+                }
+                "${tag.label}  ($locations)"
             } else {
                 tag.label
             }
@@ -1585,7 +1614,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val positionText = android.widget.TextView(this).apply {
-            text = "Pin a tag to Ring ${ringIndex + 1}, Slot ${segmentIndex + 1}"
+            text = "Pin a tag to Page ${pageIndex + 1}, Ring ${ringIndex + 1}, Slot ${segmentIndex + 1}"
             textSize = 14f
             setTextColor(android.graphics.Color.GRAY)
             setPadding(24, 8, 24, 16)
@@ -1612,7 +1641,7 @@ class MainActivity : AppCompatActivity() {
                 color = android.graphics.Color.GRAY,
                 isUnpin = true
             ) {
-                preferencesManager.removePinnedTagPosition(currentPinnedTagId)
+                preferencesManager.removePinnedTagPosition(currentPinnedTagId, pageIndex, ringIndex, segmentIndex)
                 Toast.makeText(this, "Tag unpinned", Toast.LENGTH_SHORT).show()
                 updateTagRingMenu()
                 updatePinIndicators()
@@ -1630,7 +1659,7 @@ class MainActivity : AppCompatActivity() {
                 isUnpin = false,
                 isCurrentlyPinnedHere = isPinnedHere
             ) {
-                preferencesManager.setPinnedTagPosition(tag.id, ringIndex, segmentIndex)
+                preferencesManager.setPinnedTagPosition(tag.id, pageIndex, ringIndex, segmentIndex)
                 Toast.makeText(this, "'${tag.label}' pinned to this position", Toast.LENGTH_SHORT).show()
                 updateTagRingMenu()
                 updatePinIndicators()
@@ -1739,6 +1768,17 @@ class MainActivity : AppCompatActivity() {
             else -> 90f to 180f
         }
         tagRingMenu.setArcAngles(startAngle, sweepAngle)
+
+        val swapZones = when (preferencesManager.getTagButtonPosition()) {
+            PreferencesManager.TAG_POSITION_RIGHT_CENTER,
+            PreferencesManager.TAG_POSITION_LEFT_CENTER -> setOf(0, 1)
+            PreferencesManager.TAG_POSITION_BOTTOM_RIGHT,
+            PreferencesManager.TAG_POSITION_BOTTOM_LEFT -> setOf(0)
+            PreferencesManager.TAG_POSITION_BOTTOM_CENTER -> emptySet()
+            else -> setOf(0)
+        }
+        tagRingMenu.setAvailableSwapZones(swapZones)
+        tagRingMenu.setCurrentPage(0)
         tagRingMenu.show()
     }
 
@@ -2874,58 +2914,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         val allUserTags = preferencesManager.getAllTags()
-        val pinnedPositions = preferencesManager.getPinnedTagPositions()
+        val allPins = preferencesManager.getAllPins()
         val hiddenTag = TagItem(HIDDEN_TAG_ID, "Hidden", android.graphics.Color.parseColor("#90A4AE"))
         val validTagIds = allUserTags.map { it.id }.toMutableSet().apply {
             add(HIDDEN_TAG_ID)
         }
 
         preferencesManager.cleanupInvalidPins(validTagIds)
+        val pinsAfterCleanup = preferencesManager.getAllPins()
 
         val ringSizes = listOf(3, 5, 7, 10)
+        val pageCount = 3
         val allTagsById = allUserTags.associateBy { it.id }
-        val rings = MutableList(4) { ringIndex ->
-            MutableList<TagItem?>(ringSizes[ringIndex]) { null }
-        }
-        val usedTagIds = mutableSetOf<String>()
+        val pinnedTagIds = pinsAfterCleanup.map { it.tagId }.toSet()
+        val unpinnedPool = allUserTags.filter { it.id !in pinnedTagIds }.toMutableList()
+        val hiddenIsPinned = pinsAfterCleanup.any { it.tagId == HIDDEN_TAG_ID }
+        var hiddenPlaced = hiddenIsPinned
 
-        for (ringIndex in 0 until 4) {
-            val ringSize = ringSizes[ringIndex]
-            for ((tagId, pos) in pinnedPositions) {
-                if (pos.first == ringIndex && pos.second < ringSize) {
-                    val tag = when (tagId) {
-                        HIDDEN_TAG_ID -> hiddenTag
-                        else -> allTagsById[tagId]
-                    }
-                    if (tag != null) {
-                        rings[ringIndex][pos.second] = tag
-                        usedTagIds.add(tagId)
-                    }
-                }
-            }
-        }
-
-        val unpinnedTags = allUserTags.filter { !usedTagIds.contains(it.id) }.toMutableList()
-
-        val hiddenRingIndex = 3
-        val hiddenSlotIndex = ringSizes.getOrNull(hiddenRingIndex)?.minus(2) ?: -1
-        val hiddenPlaced = hiddenSlotIndex >= 0 &&
-            hiddenRingIndex < rings.size &&
-            hiddenSlotIndex < rings[hiddenRingIndex].size &&
-            rings[hiddenRingIndex][hiddenSlotIndex] == null
-        if (hiddenPlaced) {
-            rings[hiddenRingIndex][hiddenSlotIndex] = hiddenTag
-        } else {
-            unpinnedTags.add(hiddenTag)
-        }
-
-        for (ringIndex in 0 until 4) {
-            for (i in 0 until ringSizes[ringIndex]) {
-                if (rings[ringIndex][i] == null && unpinnedTags.isNotEmpty()) {
-                    rings[ringIndex][i] = unpinnedTags.removeAt(0)
-                }
-            }
-        }
+        val ribbonItems: List<TagItem?> = listOf(
+            TagItem(RIBBON_ACTION_EDIT_TAG, "Edit", android.graphics.Color.parseColor("#455A64")),
+            TagItem(RIBBON_ACTION_EDIT_APPS, "Apps", android.graphics.Color.parseColor("#546E7A")),
+            TagItem(RIBBON_ACTION_PIN_TAG, "Pin", android.graphics.Color.parseColor("#37474F"))
+        )
 
         val useContextualTags = currentRibbonAction == null && hasActiveTagFilters()
         val availableTagIds = if (useContextualTags) {
@@ -2941,35 +2951,69 @@ class MainActivity : AppCompatActivity() {
         } else {
             true
         }
-        val displayRings: List<List<TagItem?>> = if (useContextualTags) {
-            rings.map { ring ->
-                ring.map { tag ->
-                    when (tag?.id) {
-                        null -> null
-                        HIDDEN_TAG_ID -> tag.takeIf { shouldShowHiddenTag }
-                        else -> tag.takeIf { availableTagIds.contains(it.id) }
+
+        val pageConfigs = (0 until pageCount).map { pageIndex ->
+            val rings = MutableList(4) { ringIndex ->
+                MutableList<TagItem?>(ringSizes[ringIndex]) { null }
+            }
+
+            // Place pins for this page first.
+            pinsAfterCleanup.filter { it.page == pageIndex }.forEach { pin ->
+                if (pin.ringIndex in 0 until 4 && pin.segmentIndex in 0 until ringSizes[pin.ringIndex]) {
+                    val tag = if (pin.tagId == HIDDEN_TAG_ID) hiddenTag else allTagsById[pin.tagId]
+                    if (tag != null) {
+                        rings[pin.ringIndex][pin.segmentIndex] = tag
                     }
                 }
             }
-        } else {
-            rings.map { it.toList() }
+
+            // Default position for hidden tag goes on page 0 only.
+            if (pageIndex == 0 && !hiddenPlaced) {
+                val hiddenRingIdx = 3
+                val hiddenSlotIdx = ringSizes[hiddenRingIdx] - 2
+                if (hiddenSlotIdx in 0 until ringSizes[hiddenRingIdx] &&
+                    rings[hiddenRingIdx][hiddenSlotIdx] == null
+                ) {
+                    rings[hiddenRingIdx][hiddenSlotIdx] = hiddenTag
+                    hiddenPlaced = true
+                }
+            }
+
+            // Fill remaining slots from the unpinned pool.
+            for (ringIndex in 0 until 4) {
+                for (slotIndex in 0 until ringSizes[ringIndex]) {
+                    if (rings[ringIndex][slotIndex] == null && unpinnedPool.isNotEmpty()) {
+                        rings[ringIndex][slotIndex] = unpinnedPool.removeAt(0)
+                    }
+                }
+            }
+
+            // Apply contextual filtering (tags not relevant to currently filtered apps go null).
+            val displayRings: List<List<TagItem?>> = if (useContextualTags) {
+                rings.map { ring ->
+                    ring.map { tag ->
+                        when (tag?.id) {
+                            null -> null
+                            HIDDEN_TAG_ID -> tag.takeIf { shouldShowHiddenTag }
+                            else -> tag.takeIf { availableTagIds.contains(it.id) }
+                        }
+                    }
+                }
+            } else {
+                rings.map { it.toList() }
+            }
+
+            // If hidden was placed on this page but contextual hides it, fall through to remove.
+            listOf(
+                TagRingMenuView.RingConfig(displayRings[0], 0.10f, 0.27f),
+                TagRingMenuView.RingConfig(displayRings[1], 0.27f, 0.44f),
+                TagRingMenuView.RingConfig(displayRings[2], 0.44f, 0.61f),
+                TagRingMenuView.RingConfig(displayRings[3], 0.61f, 0.78f),
+                TagRingMenuView.RingConfig(ribbonItems, 0.78f, 0.95f, isRibbon = true)
+            )
         }
 
-        val ribbonItems: List<TagItem?> = listOf(
-            TagItem(RIBBON_ACTION_EDIT_TAG, "Edit", android.graphics.Color.parseColor("#455A64")),
-            TagItem(RIBBON_ACTION_EDIT_APPS, "Apps", android.graphics.Color.parseColor("#546E7A")),
-            TagItem(RIBBON_ACTION_PIN_TAG, "Pin", android.graphics.Color.parseColor("#37474F"))
-        )
-
-        val ringConfigs = listOf(
-            TagRingMenuView.RingConfig(displayRings[0], 0.10f, 0.27f),
-            TagRingMenuView.RingConfig(displayRings[1], 0.27f, 0.44f),
-            TagRingMenuView.RingConfig(displayRings[2], 0.44f, 0.61f),
-            TagRingMenuView.RingConfig(displayRings[3], 0.61f, 0.78f),
-            TagRingMenuView.RingConfig(ribbonItems, 0.78f, 0.95f, isRibbon = true)
-        )
-
-        tagRingMenu.setRings(ringConfigs)
+        tagRingMenu.setPages(pageConfigs)
 
         if (currentRibbonAction == RIBBON_ACTION_PIN_TAG) {
             updatePinIndicators()
@@ -2977,8 +3021,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updatePinIndicators() {
-        val pinnedPositions = preferencesManager.getPinnedTagPositions()
-        val positionSet = pinnedPositions.values.toSet()
+        val pins = preferencesManager.getAllPins()
+        val positionSet = pins
+            .map { Triple(it.page, it.ringIndex, it.segmentIndex) }
+            .toSet()
         tagRingMenu.setPinnedPositions(positionSet)
     }
 
