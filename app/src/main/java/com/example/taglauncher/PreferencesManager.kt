@@ -9,6 +9,14 @@ class PreferencesManager(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    @Volatile private var cachedAllTags: List<TagItem>? = null
+    @Volatile private var cachedGlobalIconOverrides: Map<String, AppIconOverride>? = null
+    @Volatile private var cachedComponentIconOverrides: Map<String, Map<String, AppIconOverride>>? = null
+
+    private fun invalidateTagsCache() { cachedAllTags = null }
+    private fun invalidateGlobalIconOverridesCache() { cachedGlobalIconOverrides = null }
+    private fun invalidateComponentIconOverridesCache() { cachedComponentIconOverrides = null }
+
     companion object {
         private const val PREFS_NAME = "tag_launcher_prefs"
 
@@ -308,14 +316,24 @@ class PreferencesManager(context: Context) {
         }
     }
 
+    private fun getGlobalIconOverridesMap(): Map<String, AppIconOverride> {
+        cachedGlobalIconOverrides?.let { return it }
+        val json = getGlobalIconOverridesJson()
+        val map = mutableMapOf<String, AppIconOverride>()
+        json.keys().forEach { pkg ->
+            json.optJSONObject(pkg)?.let { map[pkg] = parseIconOverride(it) }
+        }
+        cachedGlobalIconOverrides = map
+        return map
+    }
+
     private fun saveGlobalIconOverridesJson(jsonObject: JSONObject) {
         prefs.edit().putString(KEY_APP_ICON_OVERRIDES_GLOBAL, jsonObject.toString()).apply()
+        invalidateGlobalIconOverridesCache()
     }
 
     fun getGlobalIconOverride(packageName: String): AppIconOverride? {
-        val json = getGlobalIconOverridesJson()
-        val overrideJson = json.optJSONObject(packageName) ?: return null
-        return parseIconOverride(overrideJson)
+        return getGlobalIconOverridesMap()[packageName]
     }
 
     fun setGlobalIconOverride(packageName: String, override: AppIconOverride?) {
@@ -337,15 +355,29 @@ class PreferencesManager(context: Context) {
         }
     }
 
+    private fun getComponentIconOverridesMap(): Map<String, Map<String, AppIconOverride>> {
+        cachedComponentIconOverrides?.let { return it }
+        val json = getComponentIconOverridesJson()
+        val outer = mutableMapOf<String, Map<String, AppIconOverride>>()
+        json.keys().forEach { componentId ->
+            val componentJson = json.optJSONObject(componentId) ?: return@forEach
+            val inner = mutableMapOf<String, AppIconOverride>()
+            componentJson.keys().forEach { pkg ->
+                componentJson.optJSONObject(pkg)?.let { inner[pkg] = parseIconOverride(it) }
+            }
+            outer[componentId] = inner
+        }
+        cachedComponentIconOverrides = outer
+        return outer
+    }
+
     private fun saveComponentIconOverridesJson(jsonObject: JSONObject) {
         prefs.edit().putString(KEY_APP_ICON_OVERRIDES_BY_COMPONENT, jsonObject.toString()).apply()
+        invalidateComponentIconOverridesCache()
     }
 
     fun getComponentIconOverride(componentId: String, packageName: String): AppIconOverride? {
-        val json = getComponentIconOverridesJson()
-        val componentJson = json.optJSONObject(componentId) ?: return null
-        val overrideJson = componentJson.optJSONObject(packageName) ?: return null
-        return parseIconOverride(overrideJson)
+        return getComponentIconOverridesMap()[componentId]?.get(packageName)
     }
 
     fun setComponentIconOverride(componentId: String, packageName: String, override: AppIconOverride?) {
@@ -455,8 +487,9 @@ class PreferencesManager(context: Context) {
     // ==================== App Tags ====================
 
     fun getAllTags(): List<TagItem> {
+        cachedAllTags?.let { return it }
         val json = prefs.getString(KEY_USER_TAGS, "[]") ?: "[]"
-        return try {
+        val parsed = try {
             val jsonArray = JSONArray(json)
             (0 until jsonArray.length()).map { i ->
                 val obj = jsonArray.getJSONObject(i)
@@ -469,6 +502,8 @@ class PreferencesManager(context: Context) {
         } catch (e: Exception) {
             emptyList()
         }
+        cachedAllTags = parsed
+        return parsed
     }
 
     fun saveAllTags(tags: List<TagItem>) {
@@ -482,6 +517,7 @@ class PreferencesManager(context: Context) {
             jsonArray.put(obj)
         }
         prefs.edit().putString(KEY_USER_TAGS, jsonArray.toString()).apply()
+        invalidateTagsCache()
     }
 
     fun addTag(tag: TagItem): Boolean {
@@ -1057,5 +1093,8 @@ class PreferencesManager(context: Context) {
 
     fun resetToDefaults() {
         prefs.edit().clear().apply()
+        invalidateTagsCache()
+        invalidateGlobalIconOverridesCache()
+        invalidateComponentIconOverridesCache()
     }
 }

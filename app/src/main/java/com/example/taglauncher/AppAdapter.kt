@@ -29,6 +29,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.FrameLayout
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.util.Locale
@@ -714,6 +715,7 @@ class AppAdapter(
     }
 
     fun updateList(newList: List<AppInfo>) {
+        val oldList = filteredList
         appList = newList
         filteredList = newList
         if (highlightedPackageName != null && newList.none { it.packageName == highlightedPackageName }) {
@@ -725,7 +727,25 @@ class AppAdapter(
             selectionMode = selectedPackages.isNotEmpty()
             onSelectionChanged?.invoke(selectedPackages.size)
         }
-        notifyDataSetChanged()
+        if (oldList.isEmpty() || newList.isEmpty()) {
+            notifyDataSetChanged()
+        } else {
+            val diff = DiffUtil.calculateDiff(
+                object : DiffUtil.Callback() {
+                    override fun getOldListSize(): Int = oldList.size
+                    override fun getNewListSize(): Int = newList.size
+                    override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean =
+                        oldList[oldPos].packageName == newList[newPos].packageName
+                    override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean {
+                        val a = oldList[oldPos]
+                        val b = newList[newPos]
+                        return a === b || (a.label == b.label && a.icon === b.icon)
+                    }
+                },
+                false
+            )
+            diff.dispatchUpdatesTo(this)
+        }
         preloadRenderedAssets(filteredList)
     }
 
