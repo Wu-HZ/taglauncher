@@ -93,9 +93,6 @@ class PreferencesManager(context: Context) {
         const val DEFAULT_TAG_BUTTON_SIZE = 56
         const val DEFAULT_TAG_BUTTON_ALPHA = 80  // 0-100 percentage
 
-        // Tag Limits
-        const val MAX_TAGS = 25
-
         // Desktop Layout (Component-based)
         private const val KEY_DESKTOP_LAYOUT = "desktop_layout"
         private const val KEY_COMPONENT_TEMPLATES = "component_templates"
@@ -490,7 +487,6 @@ class PreferencesManager(context: Context) {
     fun addTag(tag: TagItem): Boolean {
         val tags = getAllTags().toMutableList()
         if (tags.any { it.id == tag.id }) return false
-        if (tags.size >= MAX_TAGS) return false
         tags.add(tag)
         saveAllTags(tags)
         return true
@@ -738,8 +734,6 @@ class PreferencesManager(context: Context) {
             return labelMatch
         }
 
-        if (tags.size >= MAX_TAGS) return null
-
         val newTag = TagItem(
             id = "tag_workspace_${userSerial}_${System.currentTimeMillis()}",
             label = label,
@@ -898,14 +892,11 @@ class PreferencesManager(context: Context) {
                     // Use existing tag's ID
                     tagIdMapping[oldId] = existingTag.id
                 } else {
-                    // Create new tag if under limit
-                    if (existingTags.size < MAX_TAGS) {
-                        val newId = "tag_${System.currentTimeMillis()}_$i"
-                        val newTag = TagItem(newId, label, color)
-                        existingTags.add(newTag)
-                        tagIdMapping[oldId] = newId
-                        tagsImported++
-                    }
+                    val newId = "tag_${System.currentTimeMillis()}_$i"
+                    val newTag = TagItem(newId, label, color)
+                    existingTags.add(newTag)
+                    tagIdMapping[oldId] = newId
+                    tagsImported++
                 }
             }
             saveAllTags(existingTags)

@@ -2777,12 +2777,6 @@ class MainActivity : AppCompatActivity() {
     private fun showCreateTagDialog(onTagCreated: (TagItem?) -> Unit, existingTag: TagItem? = null) {
         val isEditMode = existingTag != null
 
-        if (!isEditMode && preferencesManager.getAllTags().size >= PreferencesManager.MAX_TAGS) {
-            Toast.makeText(this, "Maximum of ${PreferencesManager.MAX_TAGS} tags reached", Toast.LENGTH_SHORT).show()
-            onTagCreated(null)
-            return
-        }
-
         val container = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(48, 32, 48, 16)
