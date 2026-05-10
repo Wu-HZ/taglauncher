@@ -707,11 +707,33 @@ class AppAdapter(
 
     private fun uninstallApp(packageName: String) {
         val pkg = AppKey.pkgOf(packageName)
-        val intent = Intent(Intent.ACTION_DELETE).apply {
-            data = Uri.parse("package:$pkg")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val uri = Uri.parse("package:$pkg")
+        val pm = context.packageManager
+
+        val candidates = listOf(
+            Intent(Intent.ACTION_DELETE).setData(uri),
+            @Suppress("DEPRECATION")
+            Intent(Intent.ACTION_UNINSTALL_PACKAGE).setData(uri)
+        )
+
+        for (intent in candidates) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val resolved = pm.resolveActivity(intent, 0)
+            if (resolved != null) {
+                try {
+                    context.startActivity(intent)
+                    return
+                } catch (_: Exception) {
+                    // try next candidate
+                }
+            }
         }
-        context.startActivity(intent)
+
+        android.widget.Toast.makeText(
+            context,
+            "No uninstall handler available for $pkg",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 
     fun updateList(newList: List<AppInfo>) {
