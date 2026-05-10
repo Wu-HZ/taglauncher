@@ -137,6 +137,7 @@ class MainActivity : AppCompatActivity() {
 
     private var isTagMenuActive = false
     private var lastSelectedTagId: String? = null
+    private var menuPreviewIsRestored = true
     private var activeTagFilterIds: List<String> = emptyList()
     private var showHiddenAppsOnly = false
     private var menuOpenTagFilterSnapshot: TagFilterSnapshot? = null
@@ -146,7 +147,6 @@ class MainActivity : AppCompatActivity() {
     private var currentRibbonAction: String? = null
 
     companion object {
-        const val ALL_TAG_ID = "all"
         const val HIDDEN_TAG_ID = "hidden"
         const val RIBBON_ACTION_EDIT_TAG = "ribbon_edit_tag"
         const val RIBBON_ACTION_EDIT_APPS = "ribbon_edit_apps"
@@ -415,7 +415,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildTagFilterSnapshot(baseSnapshot: TagFilterSnapshot, tag: TagItem): TagFilterSnapshot {
         return when (tag.id) {
-            ALL_TAG_ID -> TagFilterSnapshot(emptyList(), false)
             HIDDEN_TAG_ID -> baseSnapshot.copy(showHiddenAppsOnly = true)
             else -> baseSnapshot.copy(tagIds = (baseSnapshot.tagIds + tag.id).distinct())
         }
@@ -1293,10 +1292,13 @@ class MainActivity : AppCompatActivity() {
             view.getLocationInWindow(fabLocation)
             val windowX = event.x + fabLocation[0]
             val windowY = event.y + fabLocation[1]
+            val onFab = event.x >= 0 && event.x < view.width &&
+                event.y >= 0 && event.y < view.height
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     lastSelectedTagId = null
+                    menuPreviewIsRestored = true
                     menuOpenTagFilterSnapshot = captureCurrentTagFilterSnapshot()
                     showTagMenu()
                     true
@@ -1308,12 +1310,17 @@ class MainActivity : AppCompatActivity() {
                         val isRibbon = tagRingMenu.isSelectedFromRibbon()
 
                         if (selectedTag == null) {
+                            if (currentRibbonAction == null && !menuPreviewIsRestored) {
+                                restoreMenuOpenTagFilters()
+                                menuPreviewIsRestored = true
+                            }
                             lastSelectedTagId = null
                         } else if (selectedTag.id != lastSelectedTagId) {
                             lastSelectedTagId = selectedTag.id
                             if (!isRibbon && currentRibbonAction == null) {
                                 val baseSnapshot = menuOpenTagFilterSnapshot ?: captureCurrentTagFilterSnapshot()
                                 applyTagFilterSnapshot(buildTagFilterSnapshot(baseSnapshot, selectedTag))
+                                menuPreviewIsRestored = false
                             }
                         }
                     }
@@ -1344,7 +1351,11 @@ class MainActivity : AppCompatActivity() {
                             ) {
                                 showPinTagDialog(ringIndex, segmentIndex)
                             } else if (currentRibbonAction == null) {
-                                restoreMenuOpenTagFilters()
+                                if (onFab) {
+                                    clearTagFilter()
+                                } else {
+                                    restoreMenuOpenTagFilters()
+                                }
                                 closeTagMenu()
                             }
                         }
@@ -1411,11 +1422,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyRibbonActionToTag(tag: TagItem, ringIndex: Int, segmentIndex: Int) {
-        if (tag.id == ALL_TAG_ID && currentRibbonAction != RIBBON_ACTION_PIN_TAG) {
-            Toast.makeText(this, "Cannot modify 'All' tag", Toast.LENGTH_SHORT).show()
-            return
-        }
-
         when (currentRibbonAction) {
             RIBBON_ACTION_EDIT_TAG -> showEditTagDialog(tag)
             RIBBON_ACTION_EDIT_APPS -> showEditAppsForTagDialog(tag)
@@ -1550,11 +1556,7 @@ class MainActivity : AppCompatActivity() {
         val allTags = preferencesManager.getAllTags()
         val pinnedPositions = preferencesManager.getPinnedTagPositions()
         val currentPinnedTagId = preferencesManager.getTagIdAtPinnedPosition(ringIndex, segmentIndex)
-        val allTag = TagItem(ALL_TAG_ID, "All", android.graphics.Color.parseColor("#78909C"))
-        val pinTags = mutableListOf<TagItem>().apply {
-            add(allTag)
-            addAll(allTags)
-        }
+        val pinTags = allTags.toMutableList()
 
         val tagLabels = mutableListOf<String>()
         val tagIds = mutableListOf<String?>()
@@ -2873,10 +2875,8 @@ class MainActivity : AppCompatActivity() {
 
         val allUserTags = preferencesManager.getAllTags()
         val pinnedPositions = preferencesManager.getPinnedTagPositions()
-        val allTag = TagItem(ALL_TAG_ID, "All", android.graphics.Color.parseColor("#78909C"))
         val hiddenTag = TagItem(HIDDEN_TAG_ID, "Hidden", android.graphics.Color.parseColor("#90A4AE"))
         val validTagIds = allUserTags.map { it.id }.toMutableSet().apply {
-            add(ALL_TAG_ID)
             add(HIDDEN_TAG_ID)
         }
 
@@ -2894,7 +2894,6 @@ class MainActivity : AppCompatActivity() {
             for ((tagId, pos) in pinnedPositions) {
                 if (pos.first == ringIndex && pos.second < ringSize) {
                     val tag = when (tagId) {
-                        ALL_TAG_ID -> allTag
                         HIDDEN_TAG_ID -> hiddenTag
                         else -> allTagsById[tagId]
                     }
@@ -2907,13 +2906,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         val unpinnedTags = allUserTags.filter { !usedTagIds.contains(it.id) }.toMutableList()
-        if (!pinnedPositions.containsKey(ALL_TAG_ID)) {
-            if (rings.isNotEmpty() && rings[0].isNotEmpty() && rings[0][0] == null) {
-                rings[0][0] = allTag
-            } else {
-                unpinnedTags.add(0, allTag)
-            }
-        }
 
         val hiddenRingIndex = 3
         val hiddenSlotIndex = ringSizes.getOrNull(hiddenRingIndex)?.minus(2) ?: -1
@@ -2954,7 +2946,6 @@ class MainActivity : AppCompatActivity() {
                 ring.map { tag ->
                     when (tag?.id) {
                         null -> null
-                        ALL_TAG_ID -> tag
                         HIDDEN_TAG_ID -> tag.takeIf { shouldShowHiddenTag }
                         else -> tag.takeIf { availableTagIds.contains(it.id) }
                     }

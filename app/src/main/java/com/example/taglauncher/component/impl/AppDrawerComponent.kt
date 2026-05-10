@@ -382,7 +382,7 @@ class AppDrawerComponent(
      */
     fun filterByTag(tagId: String?) {
         when (tagId) {
-            null, MainActivity.ALL_TAG_ID, "all" -> applyTagFilters(emptyList(), false)
+            null -> applyTagFilters(emptyList(), false)
             MainActivity.HIDDEN_TAG_ID -> applyTagFilters(emptyList(), true)
             else -> applyTagFilters(listOf(tagId), false)
         }
